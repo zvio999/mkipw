@@ -2,6 +2,16 @@
 deployment:
   tasks:
     - export DEPLOYPATH=/home/kipwallet159753/public_html/mkipw/
-    - /bin/cp -Rf .htaccess .user.ini *.php composer.json $DEPLOYPATH
+    - /bin/cp -f .htaccess $DEPLOYPATH
+    - /bin/cp -f .user.ini $DEPLOYPATH
+    - /bin/cp -f api.php $DEPLOYPATH
+    - /bin/cp -f deploy.php $DEPLOYPATH
+    - /bin/cp -f gas.php $DEPLOYPATH
+    - /bin/cp -f index.php $DEPLOYPATH
+    - /bin/cp -f invoices.php $DEPLOYPATH
+    - /bin/cp -f lib.php $DEPLOYPATH
+    - /bin/cp -f relay.php $DEPLOYPATH
+    - /bin/cp -f rpc.php $DEPLOYPATH
+    - /bin/cp -f composer.json $DEPLOYPATH
     - /bin/cp -Rf vendor $DEPLOYPATH
     - /bin/rm -f /home/kipwallet159753/public_html/clean.php
