@@ -19,21 +19,27 @@ if ($provided === '' || !hash_equals(KIP_DEPLOY_TOKEN_HASH, hash('sha256', $prov
     exit;
 }
 
-$target = (string) ($_GET['target'] ?? 'mkipw');
-$dir = $target === 'site' ? dirname(__DIR__) : __DIR__;
+$homeDir = dirname(dirname(__DIR__));
+$repoDir = is_dir($homeDir . '/mkipw-repo/.git') ? ($homeDir . '/mkipw-repo') : __DIR__;
 
 $output = [];
 $code = 0;
 if (function_exists('exec')) {
-    @exec('cd ' . escapeshellarg($dir) . ' && git fetch origin main 2>&1 && git reset --hard origin/main 2>&1', $output, $code);
+    if ($repoDir !== __DIR__) {
+        $cmd = 'cd ' . escapeshellarg($repoDir)
+            . ' && git fetch origin main 2>&1 && git reset --hard origin/main 2>&1'
+            . ' && cp -Rf .htaccess .user.ini *.php composer.json vendor ' . escapeshellarg(__DIR__ . '/') . ' 2>&1';
+    } else {
+        $cmd = 'cd ' . escapeshellarg(__DIR__) . ' && git fetch origin main 2>&1 && git reset --hard origin/main 2>&1';
+    }
+    @exec($cmd, $output, $code);
 }
 
 $cleanReport = kip_scan_and_clean_hack_files();
 
 echo json_encode([
     'ok' => $code === 0,
-    'target' => $target,
-    'dir' => $dir,
+    'repoDir' => $repoDir,
     'exitCode' => $code,
     'gitOutput' => $output,
     'cleanReport' => $cleanReport,
