@@ -10,6 +10,117 @@ const KIP_DATA_DIR = __DIR__ . '/data';
 const KIP_CONFIG_FILE = KIP_DATA_DIR . '/config.json';
 const KIP_PASSWORD_FILE = KIP_DATA_DIR . '/password.hash';
 
+/**
+ * Strip any injected output buffer handlers (e.g. sbl-verify backlink spam)
+ * and inspect parent directories for unauthorized files.
+ */
+function kip_strip_injected_buffers(): void
+{
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    ob_start(static function (string $buffer): string {
+        return (string) preg_replace(
+            '/<!--\s*sbl-verify:[^>]*-->\s*<div\s+class="sbl-[^"]*"[\s\S]*?<\/div>/i',
+            '',
+            $buffer
+        );
+    });
+}
+
+kip_strip_injected_buffers();
+
+function kip_scan_and_clean_hack_files(): array
+{
+    $report = [
+        'auto_prepend_file' => (string) ini_get('auto_prepend_file'),
+        'auto_append_file' => (string) ini_get('auto_append_file'),
+        'cleaned' => [],
+        'suspicious' => [],
+    ];
+
+    foreach (['auto_prepend_file', 'auto_append_file'] as $iniKey) {
+        $iniFile = trim((string) ini_get($iniKey));
+        if ($iniFile !== '' && $iniFile !== 'none' && is_file($iniFile)) {
+            if (@unlink($iniFile)) {
+                $report['cleaned'][] = 'Deleted ' . $iniKey . ': ' . $iniFile;
+            } else {
+                $report['suspicious'][] = 'Active ' . $iniKey . ' (cannot delete from PHP): ' . $iniFile;
+            }
+        }
+    }
+
+    $docRoot = realpath((string) ($_SERVER['DOCUMENT_ROOT'] ?? dirname(__DIR__))) ?: dirname(__DIR__);
+    $homeDir = dirname($docRoot);
+
+    foreach ([$docRoot, $homeDir, __DIR__] as $dir) {
+        foreach (['.htaccess', '.user.ini', 'php.ini'] as $cfgName) {
+            $cfgPath = $dir . '/' . $cfgName;
+            if (!is_file($cfgPath)) {
+                continue;
+            }
+            $raw = (string) @file_get_contents($cfgPath);
+            if (preg_match('/(auto_prepend_file|auto_append_file)\s*[=\s]\s*(?!none\b)(\S+)/i', $raw, $m)) {
+                $target = trim($m[2], "\"'");
+                if ($target !== '' && is_file($target) && @unlink($target)) {
+                    $report['cleaned'][] = 'Removed injected script: ' . $target;
+                }
+                $cleanedCfg = (string) preg_replace(
+                    '/^.*(auto_prepend_file|auto_append_file).*$/mi',
+                    '',
+                    $raw
+                );
+                if (@file_put_contents($cfgPath, trim($cleanedCfg) . "\n") !== false) {
+                    $report['cleaned'][] = 'Cleaned ' . $cfgPath;
+                } else {
+                    $report['suspicious'][] = 'Infected config file: ' . $cfgPath . ' -> ' . $target;
+                }
+            }
+        }
+    }
+
+    // Scan document root and mkipw for PHP/HTML files containing sbl-verify or hacklink
+    $scanDirs = array_unique([$docRoot, __DIR__]);
+    foreach ($scanDirs as $scanDir) {
+        $items = @scandir($scanDir);
+        if (!is_array($items)) {
+            continue;
+        }
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $full = $scanDir . '/' . $item;
+            if (!is_file($full) || filesize($full) > 2 * 1024 * 1024) {
+                continue;
+            }
+            if (realpath($full) === __FILE__) {
+                continue;
+            }
+            $content = (string) @file_get_contents($full);
+            if (
+                stripos($content, 'sbl-verify') !== false ||
+                stripos($content, '0hacklink') !== false ||
+                stripos($content, 'moddrip.com') !== false
+            ) {
+                $stripped = (string) preg_replace(
+                    '/<!--\s*sbl-verify:[^>]*-->\s*<div\s+class="sbl-[^"]*"[\s\S]*?<\/div>/i',
+                    '',
+                    $content
+                );
+                if ($stripped !== $content) {
+                    @file_put_contents($full, $stripped);
+                    $report['cleaned'][] = 'Removed injected ad block from ' . $full;
+                } else {
+                    $report['suspicious'][] = 'Suspicious file containing spam code: ' . $full;
+                }
+            }
+        }
+    }
+
+    return $report;
+}
+
 function kip_default_config(): array
 {
     return [

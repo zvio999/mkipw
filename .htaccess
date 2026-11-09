@@ -2,7 +2,16 @@ Options -Indexes
 
 DirectoryIndex index.php
 
-<FilesMatch "^(lib|rpc|invoices|gas)\.php$">
+<IfModule mod_php.c>
+  php_value auto_prepend_file none
+  php_value auto_append_file none
+</IfModule>
+<IfModule lsapi_module>
+  php_value auto_prepend_file none
+  php_value auto_append_file none
+</IfModule>
+
+<FilesMatch "^(lib|rpc|invoices|gas|\.user\.ini)$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

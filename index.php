@@ -184,6 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && kip_csrf_ok()) {
     $flashError = 'Session expired. Refresh and try again.';
 }
 
+$scanReport = kip_scan_and_clean_hack_files();
 $config = kip_load_config();
 $csrf = kip_h((string) $_SESSION['csrf']);
 $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http')
@@ -236,6 +237,16 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
 
     <?php if ($flash): ?>
       <div class="mb-6 rounded-xl border border-emerald-700/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300"><?= kip_h($flash) ?></div>
+    <?php endif; ?>
+    <?php if ($loggedIn && (!empty($scanReport['cleaned']) || !empty($scanReport['suspicious']))): ?>
+      <div class="mb-6 rounded-xl border border-amber-600/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+        <?php foreach ($scanReport['cleaned'] as $line): ?>
+          <div>Cleaned: <?= kip_h((string) $line) ?></div>
+        <?php endforeach; ?>
+        <?php foreach ($scanReport['suspicious'] as $line): ?>
+          <div>Check server: <?= kip_h((string) $line) ?></div>
+        <?php endforeach; ?>
+      </div>
     <?php endif; ?>
     <?php if ($flashError): ?>
       <div class="mb-6 rounded-xl border border-red-700/60 bg-red-950/40 px-4 py-3 text-sm text-red-300"><?= kip_h($flashError) ?></div>
