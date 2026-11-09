@@ -1,0 +1,5 @@
+.cpanel.yml text eol=lf
+*.sh text eol=lf
+*.php text eol=lf
+.htaccess text eol=lf
+.user.ini text eol=lf
