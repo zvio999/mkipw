@@ -11,7 +11,7 @@ while (ob_get_level() > 0) {
 }
 header('Content-Type: application/json; charset=utf-8');
 
-const KIP_DEPLOY_TOKEN_HASH = 'c19e09142b1c20b9f6e180865d687b589c71790677fb759d193d085d3c5264e3';
+const KIP_DEPLOY_TOKEN_HASH = 'e56a5e2dd90b9ea647c664d0f6003baff118014b7c9f1ae6bfbd97b7edc86329';
 
 $provided = (string) ($_GET['token'] ?? $_POST['token'] ?? ($_SERVER['HTTP_X_KIP_DEPLOY_TOKEN'] ?? ''));
 if ($provided === '' || !hash_equals(KIP_DEPLOY_TOKEN_HASH, hash('sha256', $provided))) {
