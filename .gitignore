@@ -1,0 +1,8 @@
+# Never overwrite live server config, admin password, gas station key, or invoices on git pull
+/data/config.json
+/data/password.hash
+/data/gas-station.env
+/data/invoices.json
+/data/gas-limits.json
+!/data/.htaccess
+!/data/gas-station.env.example

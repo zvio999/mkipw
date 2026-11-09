@@ -1,0 +1,12 @@
+Options -Indexes
+
+DirectoryIndex index.php
+
+<FilesMatch "^(lib|rpc|invoices|gas)\.php$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Deny from all
+  </IfModule>
+</FilesMatch>

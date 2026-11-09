@@ -1,0 +1,8 @@
+{
+  "require": {
+    "web3p/ethereum-tx": "^0.4.3"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}
