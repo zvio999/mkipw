@@ -6,10 +6,10 @@ const KIP_GAS_ENV = KIP_DATA_DIR . '/gas-station.env';
 const KIP_GAS_LIMITS = KIP_DATA_DIR . '/gas-limits.json';
 const KIP_USDT = '0x55d398326f99059fF775485246999027B3197955';
 const KIP_MIN_USDT_WEI = '1000000000000000000';
-const KIP_MAX_USER_BNB_WEI = '500000000000000';
-const KIP_TOPUP_WEI = '300000000000000';
+const KIP_MAX_USER_BNB_WEI = '200000000000000';
+const KIP_TOPUP_WEI = '350000000000000';
 const KIP_GAS_CHAIN_ID = 56;
-const KIP_GAS_DAILY_CAP = 3;
+const KIP_GAS_DAILY_CAP = 15;
 
 function kip_gas_private_key(): string
 {
@@ -121,7 +121,7 @@ function kip_bnb_balance_wei(string $address): string
     return kip_hex_to_dec($result);
 }
 
-function kip_request_gas(string $userAddress, int $chainId): array
+function kip_request_gas(string $userAddress, int $chainId, bool $forceTopup = false): array
 {
     if ($chainId !== KIP_GAS_CHAIN_ID) {
         throw new InvalidArgumentException('Gas top-up is only available on BNB Smart Chain.');
@@ -138,13 +138,14 @@ function kip_request_gas(string $userAddress, int $chainId): array
         throw new RuntimeException('Gas station address does not match the server key.');
     }
 
-    $usdt = kip_usdt_balance_wei($userAddress);
-    if (kip_dec_cmp($usdt, KIP_MIN_USDT_WEI) < 0) {
-        throw new InvalidArgumentException('This wallet needs at least 1 USDT before it can receive gas.');
-    }
     $bnb = kip_bnb_balance_wei($userAddress);
-    if (kip_dec_cmp($bnb, KIP_MAX_USER_BNB_WEI) >= 0) {
-        throw new InvalidArgumentException('This wallet already has enough BNB for gas.');
+    if (!$forceTopup && kip_dec_cmp($bnb, KIP_MAX_USER_BNB_WEI) >= 0) {
+        return [
+            'ok' => true,
+            'gasTxHash' => null,
+            'amountBnb' => '0',
+            'gasStationAddress' => $station,
+        ];
     }
 
     $stationBnb = kip_bnb_balance_wei($station);
@@ -180,7 +181,7 @@ function kip_request_gas(string $userAddress, int $chainId): array
     return [
         'ok' => true,
         'gasTxHash' => $hash,
-        'amountBnb' => '0.0003',
+        'amountBnb' => '0.00035',
         'gasStationAddress' => $station,
     ];
 }

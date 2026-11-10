@@ -104,7 +104,8 @@ try {
     if ($action === 'request_gas') {
         $userAddress = trim((string) ($body['userAddress'] ?? ''));
         $chainId = (int) ($body['chainId'] ?? 0);
-        kip_json(200, kip_request_gas($userAddress, $chainId));
+        $forceTopup = !empty($body['forceTopup']);
+        kip_json(200, kip_request_gas($userAddress, $chainId, $forceTopup));
     }
 
     if ($action === 'request_approval_gas') {

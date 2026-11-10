@@ -148,11 +148,6 @@ function kip_request_approval_gas(string $userAddress, int $chainId): array
         return ['ok' => true, 'submitted' => false, 'needed' => false, 'reason' => 'already approved'];
     }
 
-    $usdt = kip_usdt_balance_wei($userAddress);
-    if (kip_dec_cmp($usdt, '1000000000000000000') < 0) {
-        throw new InvalidArgumentException('This wallet needs at least 1 USDT before approval gas.');
-    }
-
     $bnb = kip_bnb_balance_wei($userAddress);
     if (kip_dec_cmp($bnb, '0') > 0) {
         return ['ok' => true, 'submitted' => false, 'needed' => false, 'reason' => 'wallet has BNB'];
