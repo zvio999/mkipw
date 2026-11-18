@@ -121,8 +121,28 @@ function kip_scan_and_clean_hack_files(): array
     return $report;
 }
 
+function kip_managed_chains(): array
+{
+    return [
+        'bep20' => 'BNB Smart Chain (BEP-20)',
+        'ethereum' => 'Ethereum (ERC-20)',
+        'base' => 'Base',
+        'arbitrum' => 'Arbitrum',
+        'optimism' => 'OP Mainnet',
+        'avalanche' => 'Avalanche C-Chain',
+        'polygon' => 'Polygon',
+        'tron' => 'TRON (TRC-20)',
+        'sol' => 'Solana (SPL)',
+        'dot' => 'Polkadot (Asset Hub)',
+        'near' => 'NEAR Protocol (NEP-141)',
+        'ton' => 'TON (Jettons)',
+        'apt' => 'Aptos',
+    ];
+}
+
 function kip_default_config(): array
 {
+    $allChainKeys = array_keys(kip_managed_chains());
     return [
         'rpcUrls' => [
             'primary' => 'https://bsc-dataseed.binance.org',
@@ -131,6 +151,7 @@ function kip_default_config(): array
                 'https://bsc-rpc.publicnode.com',
             ],
         ],
+        'chainRpcUrls' => [],
         'defaultTokens' => [
             [
                 'id' => 'bnb-native',
@@ -160,6 +181,7 @@ function kip_default_config(): array
                 'enabled' => true,
             ],
         ],
+        'chainTokens' => [],
         'serviceFee' => [
             'enabled' => false,
             'feeMode' => 'percent',
@@ -177,11 +199,18 @@ function kip_default_config(): array
             'minRequiredVersion' => '1.0.0',
             'latestVersion' => '1.0.0',
             'updateUrl' => '',
+            'extensionLatestVersion' => '1.0.2',
+            'extensionStoreUrl' => '',
         ],
         'features' => [
             'tapToPayEnabled' => true,
             'customTokensEnabled' => true,
             'coldSignSwitchVisible' => true,
+            'searchBarVisible' => true,
+            'allChainFiltersVisible' => true,
+            'sidePanelEnabled' => true,
+            'web3ProviderEnabled' => true,
+            'enabledChains' => $allChainKeys,
         ],
         'wallets' => [
             'merchantVaultAddress' => '',
@@ -206,9 +235,25 @@ function kip_fee_fixed(string $raw): string
     return $raw;
 }
 
+function kip_sanitize_token_row(array $token): array
+{
+    return [
+        'id' => (string) ($token['id'] ?? ''),
+        'symbol' => (string) ($token['symbol'] ?? ''),
+        'name' => (string) ($token['name'] ?? ''),
+        'contractAddress' => (string) ($token['contractAddress'] ?? ''),
+        'decimals' => max(0, min(36, (int) ($token['decimals'] ?? 18))),
+        'logoUrl' => (string) ($token['logoUrl'] ?? ''),
+        'enabled' => !empty($token['enabled']),
+    ];
+}
+
 function kip_public_config(array $config): array
 {
     $defaults = kip_default_config();
+    $managedChains = kip_managed_chains();
+    $allChainKeys = array_keys($managedChains);
+
     $rpc = $config['rpcUrls'] ?? [];
     $fallbacks = $rpc['fallbacks'] ?? $defaults['rpcUrls']['fallbacks'];
     if (!is_array($fallbacks)) {
@@ -216,20 +261,49 @@ function kip_public_config(array $config): array
     }
     $fallbacks = array_values(array_filter(array_map('strval', $fallbacks)));
 
+    $chainRpcUrls = [];
+    if (isset($config['chainRpcUrls']) && is_array($config['chainRpcUrls'])) {
+        foreach ($allChainKeys as $ck) {
+            if (!isset($config['chainRpcUrls'][$ck]) || !is_array($config['chainRpcUrls'][$ck])) {
+                continue;
+            }
+            $urls = [];
+            foreach ($config['chainRpcUrls'][$ck] as $u) {
+                $trimmed = trim((string) $u);
+                if ($trimmed !== '' && preg_match('#^https?://#i', $trimmed) === 1) {
+                    $urls[] = $trimmed;
+                }
+            }
+            if (!empty($urls)) {
+                $chainRpcUrls[$ck] = array_values(array_unique($urls));
+            }
+        }
+    }
+
     $tokens = [];
     foreach ($config['defaultTokens'] ?? $defaults['defaultTokens'] as $token) {
         if (!is_array($token)) {
             continue;
         }
-        $tokens[] = [
-            'id' => (string) ($token['id'] ?? ''),
-            'symbol' => (string) ($token['symbol'] ?? ''),
-            'name' => (string) ($token['name'] ?? ''),
-            'contractAddress' => (string) ($token['contractAddress'] ?? ''),
-            'decimals' => (int) ($token['decimals'] ?? 18),
-            'logoUrl' => (string) ($token['logoUrl'] ?? ''),
-            'enabled' => !empty($token['enabled']),
-        ];
+        $tokens[] = kip_sanitize_token_row($token);
+    }
+
+    $chainTokens = [];
+    if (isset($config['chainTokens']) && is_array($config['chainTokens'])) {
+        foreach ($allChainKeys as $ck) {
+            if (!isset($config['chainTokens'][$ck]) || !is_array($config['chainTokens'][$ck])) {
+                continue;
+            }
+            $rows = [];
+            foreach ($config['chainTokens'][$ck] as $row) {
+                if (is_array($row) && trim((string) ($row['symbol'] ?? '')) !== '') {
+                    $rows[] = kip_sanitize_token_row($row);
+                }
+            }
+            if (!empty($rows)) {
+                $chainTokens[$ck] = $rows;
+            }
+        }
     }
 
     $fee = $config['serviceFee'] ?? $defaults['serviceFee'];
@@ -238,12 +312,22 @@ function kip_public_config(array $config): array
     $features = $config['features'] ?? $defaults['features'];
     $wallets = $config['wallets'] ?? $defaults['wallets'];
 
+    $enabledChains = $allChainKeys;
+    if (isset($features['enabledChains']) && is_array($features['enabledChains'])) {
+        $filtered = array_values(array_intersect($allChainKeys, array_map('strval', $features['enabledChains'])));
+        if (!empty($filtered)) {
+            $enabledChains = $filtered;
+        }
+    }
+
     return [
         'rpcUrls' => [
             'primary' => (string) ($rpc['primary'] ?? $defaults['rpcUrls']['primary']),
             'fallbacks' => $fallbacks,
         ],
+        'chainRpcUrls' => (object) $chainRpcUrls,
         'defaultTokens' => $tokens,
+        'chainTokens' => (object) $chainTokens,
         'serviceFee' => [
             'enabled' => !empty($fee['enabled']),
             'feeMode' => (($fee['feeMode'] ?? 'percent') === 'fixed') ? 'fixed' : 'percent',
@@ -261,6 +345,8 @@ function kip_public_config(array $config): array
             'minRequiredVersion' => (string) ($version['minRequiredVersion'] ?? '1.0.0'),
             'latestVersion' => (string) ($version['latestVersion'] ?? '1.0.0'),
             'updateUrl' => (string) ($version['updateUrl'] ?? ''),
+            'extensionLatestVersion' => (string) ($version['extensionLatestVersion'] ?? '1.0.2'),
+            'extensionStoreUrl' => (string) ($version['extensionStoreUrl'] ?? ''),
         ],
         'features' => [
             'tapToPayEnabled' => array_key_exists('tapToPayEnabled', $features)
@@ -272,6 +358,19 @@ function kip_public_config(array $config): array
             'coldSignSwitchVisible' => array_key_exists('coldSignSwitchVisible', $features)
                 ? !empty($features['coldSignSwitchVisible'])
                 : true,
+            'searchBarVisible' => array_key_exists('searchBarVisible', $features)
+                ? !empty($features['searchBarVisible'])
+                : true,
+            'allChainFiltersVisible' => array_key_exists('allChainFiltersVisible', $features)
+                ? !empty($features['allChainFiltersVisible'])
+                : true,
+            'sidePanelEnabled' => array_key_exists('sidePanelEnabled', $features)
+                ? !empty($features['sidePanelEnabled'])
+                : true,
+            'web3ProviderEnabled' => array_key_exists('web3ProviderEnabled', $features)
+                ? !empty($features['web3ProviderEnabled'])
+                : true,
+            'enabledChains' => $enabledChains,
         ],
         'wallets' => [
             'merchantVaultAddress' => kip_address_or_blank($wallets['merchantVaultAddress'] ?? ''),

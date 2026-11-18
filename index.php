@@ -155,13 +155,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && kip_csrf_ok()) {
                 $flash = 'Token removed.';
             }
         } elseif ($action === 'save_features') {
+            $managedKeys = array_keys(kip_managed_chains());
+            $postedChains = $_POST['enabledChains'] ?? [];
+            $enabledChains = is_array($postedChains)
+                ? array_values(array_intersect($managedKeys, array_map('strval', $postedChains)))
+                : $managedKeys;
+            if (empty($enabledChains)) {
+                $enabledChains = $managedKeys;
+            }
             $config['features'] = [
                 'tapToPayEnabled' => isset($_POST['tapToPayEnabled']),
                 'customTokensEnabled' => isset($_POST['customTokensEnabled']),
                 'coldSignSwitchVisible' => isset($_POST['coldSignSwitchVisible']),
+                'searchBarVisible' => isset($_POST['searchBarVisible']),
+                'allChainFiltersVisible' => isset($_POST['allChainFiltersVisible']),
+                'sidePanelEnabled' => isset($_POST['sidePanelEnabled']),
+                'web3ProviderEnabled' => isset($_POST['web3ProviderEnabled']),
+                'enabledChains' => $enabledChains,
             ];
             kip_save_config($config);
-            $flash = 'Feature flags saved.';
+            $flash = 'Feature flags and enabled networks saved.';
+        } elseif ($action === 'save_chain_rpc') {
+            $managedKeys = array_keys(kip_managed_chains());
+            $chainKey = trim((string) ($_POST['chainKey'] ?? ''));
+            if (in_array($chainKey, $managedKeys, true)) {
+                $lines = preg_split('/\r\n|\r|\n/', (string) ($_POST['chainRpcLines'] ?? '')) ?: [];
+                $lines = array_values(array_filter(array_map('trim', $lines)));
+                $map = (array) ($config['chainRpcUrls'] ?? []);
+                if (empty($lines)) {
+                    unset($map[$chainKey]);
+                } else {
+                    $map[$chainKey] = $lines;
+                }
+                $config['chainRpcUrls'] = $map;
+                kip_save_config($config);
+                $flash = 'RPC overrides saved for ' . $chainKey . '.';
+            }
+        } elseif ($action === 'add_chain_token') {
+            $managedKeys = array_keys(kip_managed_chains());
+            $chainKey = trim((string) ($_POST['chainKey'] ?? ''));
+            $token = kip_token_from_post();
+            if (!in_array($chainKey, $managedKeys, true)) {
+                $flashError = 'Invalid chain selected.';
+            } elseif ($token['symbol'] === '') {
+                $flashError = 'Token symbol is required.';
+            } else {
+                $prefixMap = [
+                    'bep20' => 'bep20', 'ethereum' => 'eth', 'base' => 'base',
+                    'arbitrum' => 'arb', 'optimism' => 'op', 'avalanche' => 'avax',
+                    'polygon' => 'polygon', 'tron' => 'tron', 'sol' => 'sol',
+                    'dot' => 'dot', 'near' => 'near', 'ton' => 'ton', 'apt' => 'apt',
+                ];
+                $pfx = $prefixMap[$chainKey] ?? $chainKey;
+                $token['id'] = $pfx . '-remote-' . strtolower($token['symbol']) . '-' . substr(md5($token['contractAddress'] ?: $token['symbol']), 0, 6);
+                $map = (array) ($config['chainTokens'] ?? []);
+                $list = isset($map[$chainKey]) && is_array($map[$chainKey]) ? $map[$chainKey] : [];
+                $list[] = $token;
+                $map[$chainKey] = $list;
+                $config['chainTokens'] = $map;
+                kip_save_config($config);
+                $flash = 'Live token pushed to ' . $chainKey . '.';
+            }
+        } elseif ($action === 'delete_chain_token') {
+            $chainKey = trim((string) ($_POST['chainKey'] ?? ''));
+            $index = (int) ($_POST['index'] ?? -1);
+            $map = (array) ($config['chainTokens'] ?? []);
+            if (isset($map[$chainKey]) && is_array($map[$chainKey]) && isset($map[$chainKey][$index])) {
+                array_splice($map[$chainKey], $index, 1);
+                if (empty($map[$chainKey])) {
+                    unset($map[$chainKey]);
+                }
+                $config['chainTokens'] = $map;
+                kip_save_config($config);
+                $flash = 'Token removed from ' . $chainKey . '.';
+            }
+        } elseif ($action === 'toggle_chain_token') {
+            $chainKey = trim((string) ($_POST['chainKey'] ?? ''));
+            $index = (int) ($_POST['index'] ?? -1);
+            $map = (array) ($config['chainTokens'] ?? []);
+            if (isset($map[$chainKey]) && is_array($map[$chainKey]) && isset($map[$chainKey][$index])) {
+                $map[$chainKey][$index]['enabled'] = empty($map[$chainKey][$index]['enabled']);
+                $config['chainTokens'] = $map;
+                kip_save_config($config);
+                $flash = 'Token visibility updated on ' . $chainKey . '.';
+            }
         } elseif ($action === 'save_maintenance') {
             $config['maintenance'] = [
                 'isUnderMaintenance' => isset($_POST['isUnderMaintenance']),
@@ -175,6 +252,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && kip_csrf_ok()) {
                 'minRequiredVersion' => trim((string) ($_POST['minRequiredVersion'] ?? '1.0.0')),
                 'latestVersion' => trim((string) ($_POST['latestVersion'] ?? '1.0.0')),
                 'updateUrl' => trim((string) ($_POST['updateUrl'] ?? '')),
+                'extensionLatestVersion' => trim((string) ($_POST['extensionLatestVersion'] ?? '1.0.2')),
+                'extensionStoreUrl' => trim((string) ($_POST['extensionStoreUrl'] ?? '')),
             ];
             kip_save_config($config);
             $flash = 'Version control saved.';
@@ -415,24 +494,134 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
           </form>
         </section>
 
+        <?php
+          $managedChains = kip_managed_chains();
+          $chainRpcMap = (array) ($config['chainRpcUrls'] ?? []);
+          $chainTokensMap = (array) ($config['chainTokens'] ?? []);
+          $enabledChainsList = (array) ($config['features']['enabledChains'] ?? array_keys($managedChains));
+        ?>
+
         <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
-          <h2 class="mb-4 text-lg font-semibold text-kip-gold">Feature flags</h2>
-          <form method="post" class="grid gap-3 md:grid-cols-3">
+          <h2 class="mb-2 text-lg font-semibold text-kip-gold">Multi-chain live tokens (all 13 networks)</h2>
+          <p class="mb-4 text-sm text-kip-mute">Push new default tokens or disable existing tokens on any chain instantly (0-second update on Chrome Extension &amp; Mobile without store review).</p>
+          <?php if (!empty($chainTokensMap)): ?>
+            <div class="mb-5 space-y-3">
+              <?php foreach ($chainTokensMap as $ck => $rows): ?>
+                <?php if (!is_array($rows) || empty($rows)) continue; ?>
+                <div class="rounded-xl border border-kip-border bg-kip-bg p-3">
+                  <div class="mb-2 text-xs font-bold uppercase tracking-wider text-kip-gold"><?= kip_h($managedChains[$ck] ?? (string) $ck) ?></div>
+                  <?php foreach ($rows as $idx => $rtok): ?>
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-t border-kip-border py-2 text-sm">
+                      <div>
+                        <span class="font-bold text-white"><?= kip_h((string) ($rtok['symbol'] ?? '')) ?></span>
+                        <span class="ml-2 text-kip-mute"><?= kip_h((string) ($rtok['name'] ?? '')) ?></span>
+                        <code class="ml-2 text-xs text-slate-400"><?= kip_h((string) ($rtok['contractAddress'] ?? 'native')) ?></code>
+                        <span class="ml-2 text-xs <?= !empty($rtok['enabled']) ? 'text-emerald-400' : 'text-red-400' ?>"><?= !empty($rtok['enabled']) ? 'Enabled' : 'Disabled' ?></span>
+                      </div>
+                      <form method="post" class="flex gap-2">
+                        <input type="hidden" name="csrf" value="<?= $csrf ?>" />
+                        <input type="hidden" name="chainKey" value="<?= kip_h((string) $ck) ?>" />
+                        <input type="hidden" name="index" value="<?= (int) $idx ?>" />
+                        <button name="action" value="toggle_chain_token" class="rounded border border-kip-border px-3 py-1 text-xs">Toggle</button>
+                        <button name="action" value="delete_chain_token" class="rounded border border-red-800 px-3 py-1 text-xs text-red-300">Delete</button>
+                      </form>
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+          <form method="post" class="grid gap-2 rounded-xl border border-dashed border-kip-border p-4 md:grid-cols-7">
+            <input type="hidden" name="csrf" value="<?= $csrf ?>" />
+            <input type="hidden" name="action" value="add_chain_token" />
+            <select name="chainKey" class="rounded border border-kip-border bg-kip-bg px-2 py-2 text-sm text-white">
+              <?php foreach ($managedChains as $ck => $cLabel): ?>
+                <option value="<?= kip_h($ck) ?>"><?= kip_h($cLabel) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <input name="symbol" placeholder="Symbol (e.g. PEPE)" class="rounded border border-kip-border bg-kip-bg px-2 py-2" required />
+            <input name="name" placeholder="Name" class="rounded border border-kip-border bg-kip-bg px-2 py-2" />
+            <input name="contractAddress" placeholder="Contract / Mint / Asset ID" class="rounded border border-kip-border bg-kip-bg px-2 py-2 font-mono text-xs md:col-span-2" />
+            <input type="number" name="decimals" value="18" class="rounded border border-kip-border bg-kip-bg px-2 py-2" />
+            <div class="flex items-center justify-between gap-2">
+              <label class="flex items-center gap-1 text-xs"><input type="checkbox" name="enabled" checked class="accent-kip-gold" /> On</label>
+              <button class="rounded-lg bg-kip-gold px-3 py-2 text-xs font-semibold text-kip-ink">Push token</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
+          <h2 class="mb-2 text-lg font-semibold text-kip-gold">Multi-chain RPC overrides</h2>
+          <p class="mb-4 text-sm text-kip-mute">Override RPC / API endpoints for any chain immediately. Leave empty to use built-in public nodes.</p>
+          <form method="post" class="grid gap-3 md:grid-cols-4">
+            <input type="hidden" name="csrf" value="<?= $csrf ?>" />
+            <input type="hidden" name="action" value="save_chain_rpc" />
+            <label class="text-sm text-kip-mute">Chain
+              <select name="chainKey" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white">
+                <?php foreach ($managedChains as $ck => $cLabel): ?>
+                  <option value="<?= kip_h($ck) ?>"><?= kip_h($cLabel) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </label>
+            <label class="text-sm text-kip-mute md:col-span-3">RPC URLs (one per line, blank = reset to built-in)
+              <textarea name="chainRpcLines" rows="2" placeholder="https://…" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 font-mono text-xs text-white"></textarea>
+            </label>
+            <div class="md:col-span-4 flex flex-wrap items-center justify-between gap-2">
+              <div class="text-xs text-kip-mute">
+                Active overrides: <?= empty($chainRpcMap) ? 'None (using built-in RPCs)' : kip_h(implode(', ', array_keys($chainRpcMap))) ?>
+              </div>
+              <button class="rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save chain RPC</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
+          <h2 class="mb-4 text-lg font-semibold text-kip-gold">Feature flags &amp; enabled networks</h2>
+          <form method="post" class="grid gap-4">
             <input type="hidden" name="csrf" value="<?= $csrf ?>" />
             <input type="hidden" name="action" value="save_features" />
-            <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3">
-              <input type="checkbox" name="tapToPayEnabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['tapToPayEnabled']) ? 'checked' : '' ?> />
-              Tap to pay
-            </label>
-            <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3">
-              <input type="checkbox" name="customTokensEnabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['customTokensEnabled']) ? 'checked' : '' ?> />
-              Custom tokens
-            </label>
-            <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3">
-              <input type="checkbox" name="coldSignSwitchVisible" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['coldSignSwitchVisible']) ? 'checked' : '' ?> />
-              Cold sign switch
-            </label>
-            <button class="rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save flags</button>
+            <div class="grid gap-3 md:grid-cols-4">
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="tapToPayEnabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['tapToPayEnabled']) ? 'checked' : '' ?> />
+                Tap to pay (Mobile)
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="customTokensEnabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['customTokensEnabled']) ? 'checked' : '' ?> />
+                Custom tokens
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="coldSignSwitchVisible" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['coldSignSwitchVisible']) ? 'checked' : '' ?> />
+                Freeze / Cold Sign
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="searchBarVisible" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['searchBarVisible']) ? 'checked' : '' ?> />
+                Token search bar
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="allChainFiltersVisible" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['allChainFiltersVisible']) ? 'checked' : '' ?> />
+                All-chain filter checkboxes
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="sidePanelEnabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['sidePanelEnabled']) ? 'checked' : '' ?> />
+                Extension Side Panel
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3 text-sm">
+                <input type="checkbox" name="web3ProviderEnabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['features']['web3ProviderEnabled']) ? 'checked' : '' ?> />
+                Extension Web3 Provider
+              </label>
+            </div>
+            <div>
+              <p class="mb-2 text-xs font-bold uppercase tracking-wider text-kip-mute">Visible Networks</p>
+              <div class="grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+                <?php foreach ($managedChains as $ck => $cLabel): ?>
+                  <label class="flex items-center gap-2 rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-xs">
+                    <input type="checkbox" name="enabledChains[]" value="<?= kip_h($ck) ?>" class="h-4 w-4 accent-kip-gold" <?= in_array($ck, $enabledChainsList, true) ? 'checked' : '' ?> />
+                    <span><?= kip_h($cLabel) ?></span>
+                  </label>
+                <?php endforeach; ?>
+              </div>
+            </div>
+            <button class="w-fit rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save flags &amp; networks</button>
           </form>
         </section>
 
@@ -448,7 +637,7 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
             <label class="text-sm text-kip-mute">Maintenance message
               <textarea name="message" rows="2" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white"><?= kip_h($config['maintenance']['message']) ?></textarea>
             </label>
-            <label class="text-sm text-kip-mute">Announcement banner (shown even when live)
+            <label class="text-sm text-kip-mute">Announcement banner (shown live in Mobile &amp; Chrome Extension)
               <textarea name="announcement" rows="2" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white"><?= kip_h($config['maintenance']['announcement']) ?></textarea>
             </label>
             <button class="w-fit rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save banner</button>
@@ -456,18 +645,24 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
         </section>
 
         <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
-          <h2 class="mb-4 text-lg font-semibold text-kip-gold">Version control (force update)</h2>
+          <h2 class="mb-4 text-lg font-semibold text-kip-gold">Version control (Mobile &amp; Chrome Extension)</h2>
           <form method="post" class="grid gap-4 md:grid-cols-3">
             <input type="hidden" name="csrf" value="<?= $csrf ?>" />
             <input type="hidden" name="action" value="save_version" />
-            <label class="text-sm text-kip-mute">Min required version
+            <label class="text-sm text-kip-mute">Mobile min required version
               <input name="minRequiredVersion" value="<?= kip_h($config['versionControl']['minRequiredVersion']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
             </label>
-            <label class="text-sm text-kip-mute">Latest version
+            <label class="text-sm text-kip-mute">Mobile latest version
               <input name="latestVersion" value="<?= kip_h($config['versionControl']['latestVersion']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
             </label>
-            <label class="text-sm text-kip-mute md:col-span-3">Update URL (App Store / APK)
+            <label class="text-sm text-kip-mute">Chrome Extension latest version
+              <input name="extensionLatestVersion" value="<?= kip_h($config['versionControl']['extensionLatestVersion'] ?? '1.0.2') ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
+            </label>
+            <label class="text-sm text-kip-mute md:col-span-2">Mobile Update URL (App Store / APK)
               <input type="url" name="updateUrl" value="<?= kip_h($config['versionControl']['updateUrl']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" placeholder="https://…" />
+            </label>
+            <label class="text-sm text-kip-mute">Chrome Web Store URL
+              <input type="url" name="extensionStoreUrl" value="<?= kip_h($config['versionControl']['extensionStoreUrl'] ?? '') ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" placeholder="https://chromewebstore.google.com/detail/…" />
             </label>
             <button class="rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save version</button>
           </form>
