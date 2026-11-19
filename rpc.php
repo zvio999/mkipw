@@ -2,13 +2,31 @@
 
 declare(strict_types=1);
 
-function kip_rpc_urls(): array
+function kip_rpc_urls(int $chainId = 56): array
 {
     $config = kip_load_config();
-    $urls = array_merge(
-        [$config['rpcUrls']['primary'] ?? ''],
-        $config['rpcUrls']['fallbacks'] ?? []
-    );
+    $chainRpcMap = (array) ($config['chainRpcUrls'] ?? []);
+
+    if ($chainId === 1) {
+        $custom = isset($chainRpcMap['ethereum']) && is_array($chainRpcMap['ethereum'])
+            ? $chainRpcMap['ethereum']
+            : [];
+        $urls = array_merge($custom, [
+            'https://ethereum-rpc.publicnode.com',
+            'https://eth.drpc.org',
+            'https://1rpc.io/eth',
+        ]);
+    } else {
+        $custom = isset($chainRpcMap['bep20']) && is_array($chainRpcMap['bep20'])
+            ? $chainRpcMap['bep20']
+            : [];
+        $urls = array_merge(
+            $custom,
+            [$config['rpcUrls']['primary'] ?? ''],
+            $config['rpcUrls']['fallbacks'] ?? []
+        );
+    }
+
     $clean = [];
     foreach ($urls as $url) {
         $url = trim((string) $url);
@@ -19,11 +37,11 @@ function kip_rpc_urls(): array
     return array_values(array_unique($clean));
 }
 
-function kip_rpc(string $method, array $params)
+function kip_rpc(string $method, array $params, int $chainId = 56)
 {
-    $urls = kip_rpc_urls();
+    $urls = kip_rpc_urls($chainId);
     if ($urls === []) {
-        throw new RuntimeException('No BNB Chain RPC is configured.');
+        throw new RuntimeException('No RPC endpoint is configured for chain ' . $chainId . '.');
     }
     $payload = json_encode([
         'jsonrpc' => '2.0',
@@ -120,6 +138,28 @@ function kip_dec_add(string $left, string $right): string
         return gmp_strval(gmp_add($left, $right));
     }
     throw new RuntimeException('PHP needs the gmp or bcmath extension to compare balances.');
+}
+
+function kip_dec_mul(string $left, string $right): string
+{
+    if (function_exists('bcmul')) {
+        return bcmul($left, $right, 0);
+    }
+    if (function_exists('gmp_mul')) {
+        return gmp_strval(gmp_mul($left, $right));
+    }
+    throw new RuntimeException('PHP needs the gmp or bcmath extension to calculate gas.');
+}
+
+function kip_dec_div(string $left, string $right): string
+{
+    if (function_exists('bcdiv')) {
+        return bcdiv($left, $right, 0);
+    }
+    if (function_exists('gmp_div_q')) {
+        return gmp_strval(gmp_div_q($left, $right));
+    }
+    throw new RuntimeException('PHP needs the gmp or bcmath extension to calculate gas.');
 }
 
 function kip_dec_cmp(string $left, string $right): int
