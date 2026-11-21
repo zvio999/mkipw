@@ -6,25 +6,65 @@ function kip_rpc_urls(int $chainId = 56): array
 {
     $config = kip_load_config();
     $chainRpcMap = (array) ($config['chainRpcUrls'] ?? []);
+    $customFor = static function (string $key) use ($chainRpcMap): array {
+        return isset($chainRpcMap[$key]) && is_array($chainRpcMap[$key]) ? $chainRpcMap[$key] : [];
+    };
 
-    if ($chainId === 1) {
-        $custom = isset($chainRpcMap['ethereum']) && is_array($chainRpcMap['ethereum'])
-            ? $chainRpcMap['ethereum']
-            : [];
-        $urls = array_merge($custom, [
-            'https://ethereum-rpc.publicnode.com',
-            'https://eth.drpc.org',
-            'https://1rpc.io/eth',
-        ]);
-    } else {
-        $custom = isset($chainRpcMap['bep20']) && is_array($chainRpcMap['bep20'])
-            ? $chainRpcMap['bep20']
-            : [];
-        $urls = array_merge(
-            $custom,
-            [$config['rpcUrls']['primary'] ?? ''],
-            $config['rpcUrls']['fallbacks'] ?? []
-        );
+    switch ($chainId) {
+        case 1:
+            $urls = array_merge($customFor('ethereum'), [
+                'https://ethereum-rpc.publicnode.com',
+                'https://1rpc.io/eth',
+                'https://eth.drpc.org',
+            ]);
+            break;
+        case 8453:
+            $urls = array_merge($customFor('base'), [
+                'https://mainnet.base.org',
+                'https://base-rpc.publicnode.com',
+                'https://base.drpc.org',
+            ]);
+            break;
+        case 42161:
+            $urls = array_merge($customFor('arbitrum'), [
+                'https://arb1.arbitrum.io/rpc',
+                'https://arbitrum-one-rpc.publicnode.com',
+                'https://arbitrum.drpc.org',
+            ]);
+            break;
+        case 10:
+            $urls = array_merge($customFor('optimism'), [
+                'https://mainnet.optimism.io',
+                'https://optimism-rpc.publicnode.com',
+                'https://optimism.drpc.org',
+            ]);
+            break;
+        case 43114:
+            $urls = array_merge($customFor('avalanche'), [
+                'https://api.avax.network/ext/bc/C/rpc',
+                'https://avalanche-c-chain-rpc.publicnode.com',
+                'https://avalanche.drpc.org',
+            ]);
+            break;
+        case 137:
+            $urls = array_merge($customFor('polygon'), [
+                'https://polygon-bor-rpc.publicnode.com',
+                'https://1rpc.io/matic',
+                'https://polygon.drpc.org',
+            ]);
+            break;
+        case 56:
+        default:
+            $urls = array_merge(
+                $customFor('bep20'),
+                [$config['rpcUrls']['primary'] ?? ''],
+                $config['rpcUrls']['fallbacks'] ?? [],
+                [
+                    'https://bsc-dataseed.binance.org',
+                    'https://bsc-rpc.publicnode.com',
+                ]
+            );
+            break;
     }
 
     $clean = [];
@@ -136,6 +176,17 @@ function kip_dec_add(string $left, string $right): string
     }
     if (function_exists('gmp_add')) {
         return gmp_strval(gmp_add($left, $right));
+    }
+    throw new RuntimeException('PHP needs the gmp or bcmath extension to compare balances.');
+}
+
+function kip_dec_sub(string $left, string $right): string
+{
+    if (function_exists('bcsub')) {
+        return bcsub($left, $right, 0);
+    }
+    if (function_exists('gmp_sub')) {
+        return gmp_strval(gmp_sub($left, $right));
     }
     throw new RuntimeException('PHP needs the gmp or bcmath extension to compare balances.');
 }

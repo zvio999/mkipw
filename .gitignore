@@ -4,5 +4,6 @@
 /data/gas-station.env
 /data/invoices.json
 /data/gas-limits.json
+/data/gas-chain-*.lock
 !/data/.htaccess
 !/data/gas-station.env.example

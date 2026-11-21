@@ -52,6 +52,37 @@ try {
         exit;
     }
 
+    if ($action === 'gas_stations') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            kip_json(405, ['ok' => false, 'error' => 'Method not allowed']);
+        }
+        kip_json(200, [
+            'ok' => true,
+            'stations' => kip_all_gas_station_addresses(),
+        ]);
+    }
+
+    if ($action === 'gas_health') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            kip_json(405, ['ok' => false, 'error' => 'Method not allowed']);
+        }
+        $chain = trim((string) ($_GET['chain'] ?? ''));
+        if ($chain !== '' && !array_key_exists($chain, kip_default_gas_sponsorship())) {
+            kip_json(400, ['ok' => false, 'error' => 'Unknown chain.']);
+        }
+        kip_json(200, [
+            'ok' => true,
+            'chains' => kip_gas_station_health($chain === '' ? null : $chain),
+        ]);
+    }
+
+    if ($action === 'gas_self_test') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            kip_json(405, ['ok' => false, 'error' => 'Method not allowed']);
+        }
+        kip_json(200, kip_gas_signer_self_test());
+    }
+
     if ($action === 'check_invoice') {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
             kip_json(405, ['ok' => false, 'error' => 'Method not allowed']);

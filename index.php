@@ -7,6 +7,8 @@
 declare(strict_types=1);
 
 require __DIR__ . '/lib.php';
+require_once __DIR__ . '/rpc.php';
+require_once __DIR__ . '/gas.php';
 
 session_name('KIPADMINSESS');
 session_start([
@@ -101,6 +103,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && kip_csrf_ok()) {
             ];
             kip_save_config($config);
             $flash = 'Wallet addresses saved. The gas-station private key stays in data/gas-station.env and is never shown here.';
+        } elseif ($action === 'save_gas_sponsorship') {
+            $defaults = kip_default_gas_sponsorship();
+            $posted = isset($_POST['gas']) && is_array($_POST['gas']) ? $_POST['gas'] : [];
+            $next = [];
+            foreach ($defaults as $chainKey => $chainDefaults) {
+                $row = isset($posted[$chainKey]) && is_array($posted[$chainKey]) ? $posted[$chainKey] : [];
+                $row['enabled'] = isset($row['enabled']);
+                $next[$chainKey] = array_merge($chainDefaults, $row);
+            }
+            $config['gasSponsorship'] = kip_sanitize_gas_sponsorship($next);
+            kip_save_config($config);
+            $flash = 'Gas sponsorship settings saved. Enable a chain only after its displayed sponsor address is funded and tested.';
         } elseif ($action === 'save_fee') {
             $config['serviceFee'] = [
                 'enabled' => isset($_POST['fee_enabled']),
@@ -377,6 +391,86 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
               <input type="text" name="relayerContract" value="<?= kip_h($config['wallets']['relayerContract'] ?? '') ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 font-mono text-white" placeholder="0x…" />
             </label>
             <button class="w-fit rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save wallet addresses</button>
+          </form>
+
+          <?php $stationAddrs = kip_all_gas_station_addresses(); ?>
+          <div class="mt-6 rounded-xl border border-kip-border bg-kip-bg p-4">
+            <h3 class="mb-1 text-sm font-semibold text-kip-gold">Wallet 1 Deposit Addresses (All 13 Chains)</h3>
+            <p class="mb-3 text-xs text-kip-mute">Each non-EVM chain uses its own protected key in <code>data/gas-station.env</code>. Fund a displayed address with that chain's native coin before enabling sponsorship.</p>
+            <?php if (!empty($stationAddrs['configured'])): ?>
+              <div class="grid gap-2 text-xs">
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">7 EVM Chains — BNB Smart Chain (BNB), Ethereum (ETH), Base (ETH), Arbitrum (ETH), OP Mainnet (ETH), Avalanche (AVAX), Polygon (POL)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['evm']) ?></div>
+                </div>
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">TRON (TRX — sponsors TRC-20 &amp; TRX transfers)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['tron']) ?></div>
+                  <?php if (!empty($stationAddrs['tronError'])): ?><div class="mt-1 text-amber-400"><?= kip_h((string) $stationAddrs['tronError']) ?></div><?php endif; ?>
+                </div>
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">Solana (SOL — sponsors SPL &amp; SOL transfers)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['sol']) ?></div>
+                  <?php if (!empty($stationAddrs['solError'])): ?><div class="mt-1 text-amber-400"><?= kip_h((string) $stationAddrs['solError']) ?></div><?php endif; ?>
+                </div>
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">TON (GRAM — sponsors Jetton &amp; GRAM transfers)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['ton']) ?></div>
+                  <?php if (!empty($stationAddrs['tonError'])): ?><div class="mt-1 text-amber-400"><?= kip_h((string) $stationAddrs['tonError']) ?></div><?php endif; ?>
+                </div>
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">Aptos (APT — sponsors Fungible Asset &amp; APT transfers)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['apt']) ?></div>
+                  <?php if (!empty($stationAddrs['aptError'])): ?><div class="mt-1 text-amber-400"><?= kip_h((string) $stationAddrs['aptError']) ?></div><?php endif; ?>
+                </div>
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">NEAR Protocol (NEAR — sponsors NEP-141 &amp; NEAR transfers)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['near']) ?></div>
+                  <?php if (!empty($stationAddrs['nearError'])): ?><div class="mt-1 text-amber-400"><?= kip_h((string) $stationAddrs['nearError']) ?></div><?php endif; ?>
+                </div>
+                <div class="rounded-lg border border-kip-border px-3 py-2">
+                  <div class="text-kip-mute">Polkadot Asset Hub (DOT — sponsors Asset Hub USDT/USDC &amp; DOT transfers)</div>
+                  <div class="mt-0.5 select-all break-all font-mono text-white"><?= kip_h((string) $stationAddrs['dot']) ?></div>
+                  <?php if (!empty($stationAddrs['dotError'])): ?><div class="mt-1 text-amber-400"><?= kip_h((string) $stationAddrs['dotError']) ?></div><?php endif; ?>
+                </div>
+              </div>
+            <?php else: ?>
+              <p class="text-xs text-amber-400"><?= kip_h((string) ($stationAddrs['error'] ?? 'GAS_STATION_PRIVATE_KEY is not configured yet.')) ?></p>
+            <?php endif; ?>
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
+          <h2 class="mb-2 text-lg font-semibold text-kip-gold">Native gas sponsorship</h2>
+          <p class="mb-4 text-sm text-kip-mute">Amounts are in each chain's smallest unit (wei, sun, lamports, nano, octas, yocto, or plancks). Disabled chains never send funds.</p>
+          <form method="post" class="space-y-3">
+            <input type="hidden" name="csrf" value="<?= $csrf ?>" />
+            <input type="hidden" name="action" value="save_gas_sponsorship" />
+            <?php foreach (kip_sanitize_gas_sponsorship($config['gasSponsorship'] ?? null) as $chainKey => $gasRow): ?>
+              <div class="grid gap-3 rounded-xl border border-kip-border bg-kip-bg p-3 md:grid-cols-6">
+                <label class="flex items-center gap-2 text-sm text-white">
+                  <input type="checkbox" name="gas[<?= kip_h($chainKey) ?>][enabled]" class="h-5 w-5 accent-kip-gold" <?= !empty($gasRow['enabled']) ? 'checked' : '' ?> />
+                  <span><?= kip_h(kip_managed_chains()[$chainKey] ?? $chainKey) ?><br><span class="text-xs text-kip-mute"><?= kip_h((string) $gasRow['symbol']) ?></span></span>
+                </label>
+                <label class="text-xs text-kip-mute">Low-balance threshold
+                  <input name="gas[<?= kip_h($chainKey) ?>][thresholdRaw]" value="<?= kip_h((string) $gasRow['thresholdRaw']) ?>" inputmode="numeric" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-2 font-mono text-white" />
+                </label>
+                <label class="text-xs text-kip-mute">Target top-up
+                  <input name="gas[<?= kip_h($chainKey) ?>][topupRaw]" value="<?= kip_h((string) $gasRow['topupRaw']) ?>" inputmode="numeric" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-2 font-mono text-white" />
+                </label>
+                <label class="text-xs text-kip-mute">Maximum top-up
+                  <input name="gas[<?= kip_h($chainKey) ?>][maxTopupRaw]" value="<?= kip_h((string) $gasRow['maxTopupRaw']) ?>" inputmode="numeric" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-2 font-mono text-white" />
+                </label>
+                <label class="text-xs text-kip-mute">Daily cap
+                  <input type="number" min="1" max="100" name="gas[<?= kip_h($chainKey) ?>][dailyCap]" value="<?= (int) $gasRow['dailyCap'] ?>" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-2 text-white" />
+                </label>
+                <div class="self-end pb-2 text-xs text-kip-mute">
+                  <div>Chain ID <?= (int) $gasRow['chainId'] ?></div>
+                  <a class="text-kip-gold underline" target="_blank" rel="noopener" href="api.php?action=gas_health&amp;chain=<?= rawurlencode($chainKey) ?>">Check funding health</a>
+                </div>
+              </div>
+            <?php endforeach; ?>
+            <button class="rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save gas sponsorship</button>
           </form>
         </section>
 

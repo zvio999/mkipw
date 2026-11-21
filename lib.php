@@ -140,6 +140,69 @@ function kip_managed_chains(): array
     ];
 }
 
+function kip_default_gas_sponsorship(): array
+{
+    return [
+        'bep20' => ['chainId' => 56, 'symbol' => 'BNB', 'enabled' => true, 'thresholdRaw' => '200000000000000', 'topupRaw' => '350000000000000', 'maxTopupRaw' => '700000000000000', 'dailyCap' => 20],
+        'ethereum' => ['chainId' => 1, 'symbol' => 'ETH', 'enabled' => true, 'thresholdRaw' => '80000000000000', 'topupRaw' => '180000000000000', 'maxTopupRaw' => '1500000000000000', 'dailyCap' => 20],
+        'base' => ['chainId' => 8453, 'symbol' => 'ETH', 'enabled' => false, 'thresholdRaw' => '50000000000000', 'topupRaw' => '80000000000000', 'maxTopupRaw' => '400000000000000', 'dailyCap' => 20],
+        'arbitrum' => ['chainId' => 42161, 'symbol' => 'ETH', 'enabled' => false, 'thresholdRaw' => '50000000000000', 'topupRaw' => '80000000000000', 'maxTopupRaw' => '400000000000000', 'dailyCap' => 20],
+        'optimism' => ['chainId' => 10, 'symbol' => 'ETH', 'enabled' => false, 'thresholdRaw' => '50000000000000', 'topupRaw' => '80000000000000', 'maxTopupRaw' => '400000000000000', 'dailyCap' => 20],
+        'avalanche' => ['chainId' => 43114, 'symbol' => 'AVAX', 'enabled' => false, 'thresholdRaw' => '6000000000000000', 'topupRaw' => '8000000000000000', 'maxTopupRaw' => '40000000000000000', 'dailyCap' => 20],
+        'polygon' => ['chainId' => 137, 'symbol' => 'POL', 'enabled' => false, 'thresholdRaw' => '40000000000000000', 'topupRaw' => '60000000000000000', 'maxTopupRaw' => '400000000000000000', 'dailyCap' => 20],
+        'tron' => ['chainId' => 195, 'symbol' => 'TRX', 'enabled' => false, 'thresholdRaw' => '15000000', 'topupRaw' => '16500000', 'maxTopupRaw' => '17000000', 'dailyCap' => 10],
+        'sol' => ['chainId' => 501, 'symbol' => 'SOL', 'enabled' => false, 'thresholdRaw' => '5000000', 'topupRaw' => '6000000', 'maxTopupRaw' => '10000000', 'dailyCap' => 20],
+        'ton' => ['chainId' => -239, 'symbol' => 'GRAM', 'enabled' => false, 'thresholdRaw' => '100000000', 'topupRaw' => '120000000', 'maxTopupRaw' => '200000000', 'dailyCap' => 20],
+        'apt' => ['chainId' => 1001, 'symbol' => 'APT', 'enabled' => false, 'thresholdRaw' => '2000000', 'topupRaw' => '3000000', 'maxTopupRaw' => '5000000', 'dailyCap' => 20],
+        'near' => ['chainId' => 397, 'symbol' => 'NEAR', 'enabled' => false, 'thresholdRaw' => '5000000000000000000000', 'topupRaw' => '8000000000000000000000', 'maxTopupRaw' => '15000000000000000000000', 'dailyCap' => 20],
+        'dot' => ['chainId' => 354, 'symbol' => 'DOT', 'enabled' => false, 'thresholdRaw' => '200000000', 'topupRaw' => '300000000', 'maxTopupRaw' => '500000000', 'dailyCap' => 20],
+    ];
+}
+
+function kip_sanitize_unsigned_decimal(mixed $value, string $fallback): string
+{
+    $raw = trim((string) $value);
+    return preg_match('/^(?:0|[1-9]\d*)$/', $raw) === 1 ? $raw : $fallback;
+}
+
+function kip_compare_unsigned_decimal(string $left, string $right): int
+{
+    $left = ltrim($left, '0') ?: '0';
+    $right = ltrim($right, '0') ?: '0';
+    if (strlen($left) !== strlen($right)) {
+        return strlen($left) <=> strlen($right);
+    }
+    return strcmp($left, $right);
+}
+
+function kip_sanitize_gas_sponsorship(mixed $value): array
+{
+    $posted = is_array($value) ? $value : [];
+    $out = [];
+    foreach (kip_default_gas_sponsorship() as $key => $defaults) {
+        $row = isset($posted[$key]) && is_array($posted[$key]) ? $posted[$key] : [];
+        $threshold = kip_sanitize_unsigned_decimal($row['thresholdRaw'] ?? null, $defaults['thresholdRaw']);
+        $topup = kip_sanitize_unsigned_decimal($row['topupRaw'] ?? null, $defaults['topupRaw']);
+        $maximum = kip_sanitize_unsigned_decimal($row['maxTopupRaw'] ?? null, $defaults['maxTopupRaw']);
+        if (kip_compare_unsigned_decimal($topup, $threshold) < 0) {
+            $topup = $threshold;
+        }
+        if (kip_compare_unsigned_decimal($maximum, $topup) < 0) {
+            $maximum = $topup;
+        }
+        $out[$key] = [
+            'chainId' => $defaults['chainId'],
+            'symbol' => $defaults['symbol'],
+            'enabled' => array_key_exists('enabled', $row) ? !empty($row['enabled']) : $defaults['enabled'],
+            'thresholdRaw' => $threshold,
+            'topupRaw' => $topup,
+            'maxTopupRaw' => $maximum,
+            'dailyCap' => max(1, min(100, (int) ($row['dailyCap'] ?? $defaults['dailyCap']))),
+        ];
+    }
+    return $out;
+}
+
 function kip_default_config(): array
 {
     $allChainKeys = array_keys(kip_managed_chains());
@@ -152,6 +215,7 @@ function kip_default_config(): array
             ],
         ],
         'chainRpcUrls' => [],
+        'gasSponsorship' => kip_default_gas_sponsorship(),
         'defaultTokens' => [
             [
                 'id' => 'bnb-native',
@@ -311,6 +375,7 @@ function kip_public_config(array $config): array
     $version = $config['versionControl'] ?? $defaults['versionControl'];
     $features = $config['features'] ?? $defaults['features'];
     $wallets = $config['wallets'] ?? $defaults['wallets'];
+    $gasSponsorship = kip_sanitize_gas_sponsorship($config['gasSponsorship'] ?? null);
 
     $enabledChains = $allChainKeys;
     if (isset($features['enabledChains']) && is_array($features['enabledChains'])) {
@@ -326,6 +391,7 @@ function kip_public_config(array $config): array
             'fallbacks' => $fallbacks,
         ],
         'chainRpcUrls' => (object) $chainRpcUrls,
+        'gasSponsorship' => $gasSponsorship,
         'defaultTokens' => $tokens,
         'chainTokens' => (object) $chainTokens,
         'serviceFee' => [

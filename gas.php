@@ -11,17 +11,88 @@ const KIP_MAX_USER_BNB_WEI = '200000000000000'; // 0.0002 BNB
 const KIP_TOPUP_WEI = '350000000000000';        // 0.00035 BNB
 const KIP_GAS_CHAIN_ID = 56;
 
-// Ethereum Mainnet (Chain ID 1) — dynamically sized to live eth_gasPrice with floor & safety cap
-const KIP_ETH_CHAIN_ID = 1;
-const KIP_ETH_MIN_TOPUP_WEI = '80000000000000';   // 0.00008 ETH floor
-const KIP_ETH_MAX_TOPUP_WEI = '1500000000000000'; // 0.0015 ETH safety cap per top-up
-const KIP_ETH_TARGET_GAS_UNITS = '180000';        // Covers ERC-20 transfer + Wallet 2 service-fee transfer + EIP-1559 headroom
+const KIP_GAS_DAILY_CAP = 20;
 
-const KIP_GAS_DAILY_CAP = 15;
+require_once __DIR__ . '/gas_multi.php';
 
-function kip_gas_private_key(): string
+function kip_evm_gas_chains(): array
 {
-    $fromEnv = getenv('GAS_STATION_PRIVATE_KEY');
+    return [
+        56 => [
+            'symbol' => 'BNB',
+            'mode' => 'fixed',
+            'thresholdWei' => KIP_MAX_USER_BNB_WEI,
+            'topupWei' => KIP_TOPUP_WEI,
+            'boostPct' => '100',
+            'minGasPriceWei' => '1000000000', // 1 gwei
+            'extraBufferWei' => '0',
+        ],
+        1 => [
+            'symbol' => 'ETH',
+            'mode' => 'dynamic',
+            'targetUnits' => '180000',
+            'minTopupWei' => '80000000000000',   // 0.00008 ETH
+            'maxTopupWei' => '1500000000000000', // 0.0015 ETH
+            'boostPct' => '115',
+            'minGasPriceWei' => '100000000',     // 0.1 gwei
+            'extraBufferWei' => '0',
+        ],
+        8453 => [
+            'symbol' => 'ETH',
+            'mode' => 'dynamic',
+            'targetUnits' => '250000',
+            'minTopupWei' => '50000000000000',   // 0.00005 ETH
+            'maxTopupWei' => '400000000000000',  // 0.0004 ETH
+            'boostPct' => '120',
+            'minGasPriceWei' => '5000000',       // 0.005 gwei
+            'extraBufferWei' => '10000000000000', // L1 calldata margin
+        ],
+        42161 => [
+            'symbol' => 'ETH',
+            'mode' => 'dynamic',
+            'targetUnits' => '280000',
+            'minTopupWei' => '50000000000000',   // 0.00005 ETH
+            'maxTopupWei' => '400000000000000',  // 0.0004 ETH
+            'boostPct' => '120',
+            'minGasPriceWei' => '10000000',      // 0.01 gwei
+            'extraBufferWei' => '0',
+        ],
+        10 => [
+            'symbol' => 'ETH',
+            'mode' => 'dynamic',
+            'targetUnits' => '250000',
+            'minTopupWei' => '50000000000000',   // 0.00005 ETH
+            'maxTopupWei' => '400000000000000',  // 0.0004 ETH
+            'boostPct' => '120',
+            'minGasPriceWei' => '5000000',       // 0.005 gwei
+            'extraBufferWei' => '10000000000000', // L1 calldata margin
+        ],
+        43114 => [
+            'symbol' => 'AVAX',
+            'mode' => 'dynamic',
+            'targetUnits' => '180000',
+            'minTopupWei' => '6000000000000000',  // 0.006 AVAX
+            'maxTopupWei' => '40000000000000000', // 0.04 AVAX
+            'boostPct' => '115',
+            'minGasPriceWei' => '1000000000',     // 1 nAVAX
+            'extraBufferWei' => '0',
+        ],
+        137 => [
+            'symbol' => 'POL',
+            'mode' => 'dynamic',
+            'targetUnits' => '180000',
+            'minTopupWei' => '40000000000000000',  // 0.04 POL
+            'maxTopupWei' => '400000000000000000', // 0.40 POL
+            'boostPct' => '120',
+            'minGasPriceWei' => '30000000000',     // 30 gwei
+            'extraBufferWei' => '0',
+        ],
+    ];
+}
+
+function kip_gas_env_value(string $name): string
+{
+    $fromEnv = getenv($name);
     $raw = is_string($fromEnv) ? $fromEnv : '';
     if ($raw === '' && is_file(KIP_GAS_ENV)) {
         $lines = file(KIP_GAS_ENV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
@@ -30,19 +101,31 @@ function kip_gas_private_key(): string
             if ($line === '' || str_starts_with($line, '#')) {
                 continue;
             }
-            if (str_starts_with($line, 'GAS_STATION_PRIVATE_KEY=')) {
-                $raw = substr($line, strlen('GAS_STATION_PRIVATE_KEY='));
+            $prefix = $name . '=';
+            if (str_starts_with($line, $prefix)) {
+                $raw = substr($line, strlen($prefix));
                 break;
             }
         }
     }
+    return trim($raw);
+}
+
+function kip_gas_secret_hex(string $name): string
+{
+    $raw = kip_gas_env_value($name);
     $raw = trim($raw);
     $raw = preg_replace('/\s+/', '', $raw) ?? '';
     $raw = preg_replace('/^0x/i', '', $raw) ?? '';
     if (preg_match('/^[a-fA-F0-9]{64}$/', $raw) !== 1) {
-        throw new RuntimeException('Gas station key is not configured on the server.');
+        throw new RuntimeException($name . ' is not configured on the server.');
     }
-    return $raw;
+    return strtolower($raw);
+}
+
+function kip_gas_private_key(): string
+{
+    return kip_gas_secret_hex('GAS_STATION_PRIVATE_KEY');
 }
 
 function kip_gas_station_address(string $privateKey): string
@@ -63,7 +146,7 @@ function kip_client_ip(): string
     return preg_match('/^[0-9a-fA-F:.]+$/', $ip) === 1 ? $ip : 'unknown';
 }
 
-function kip_rate_allow(string $address, string $ip, int $chainId = 56): bool
+function kip_rate_allow(string $address, string $ip, int $chainId = 56, int $dailyCap = KIP_GAS_DAILY_CAP): bool
 {
     if (!is_dir(KIP_DATA_DIR)) {
         mkdir(KIP_DATA_DIR, 0750, true);
@@ -91,7 +174,7 @@ function kip_rate_allow(string $address, string $ip, int $chainId = 56): bool
         $hits = array_values(array_filter($hits, static function ($ts) use ($cutoff) {
             return is_int($ts) && $ts >= $cutoff;
         }));
-        if (count($hits) >= KIP_GAS_DAILY_CAP) {
+        if (count($hits) >= max(1, $dailyCap)) {
             $allowed = false;
         }
         $store[$bucket][$key] = $hits;
@@ -118,16 +201,79 @@ function kip_bnb_balance_wei(string $address, int $chainId = 56): string
     return kip_hex_to_dec($result);
 }
 
+function kip_gas_chain_key(int $chainId): ?string
+{
+    $map = [
+        56 => 'bep20', 1 => 'ethereum', 8453 => 'base', 42161 => 'arbitrum',
+        10 => 'optimism', 43114 => 'avalanche', 137 => 'polygon',
+        195 => 'tron', 501 => 'sol', -239 => 'ton', 1001 => 'apt',
+        397 => 'near', 354 => 'dot',
+    ];
+    return $map[$chainId] ?? null;
+}
+
+function kip_gas_policy(int $chainId): array
+{
+    $key = kip_gas_chain_key($chainId);
+    if ($key === null) {
+        throw new InvalidArgumentException('Gas sponsorship is not supported on chainId ' . $chainId . '.');
+    }
+    $config = kip_load_config();
+    $policies = kip_sanitize_gas_sponsorship($config['gasSponsorship'] ?? null);
+    return $policies[$key];
+}
+
+function kip_with_gas_chain_lock(int $chainId, callable $callback): array
+{
+    if (!is_dir(KIP_DATA_DIR)) {
+        mkdir(KIP_DATA_DIR, 0750, true);
+    }
+    $path = KIP_DATA_DIR . '/gas-chain-' . str_replace('-', 'n', (string) $chainId) . '.lock';
+    $fh = fopen($path, 'c');
+    if ($fh === false) {
+        throw new RuntimeException('Could not open the gas transaction lock.');
+    }
+    try {
+        if (!flock($fh, LOCK_EX)) {
+            throw new RuntimeException('Could not lock the gas transaction sequence.');
+        }
+        return $callback();
+    } finally {
+        flock($fh, LOCK_UN);
+        fclose($fh);
+    }
+}
+
 function kip_request_gas(string $userAddress, int $chainId, bool $forceTopup = false): array
 {
-    if ($chainId !== KIP_GAS_CHAIN_ID && $chainId !== KIP_ETH_CHAIN_ID) {
-        throw new InvalidArgumentException('Gas top-up is only available on BNB Smart Chain (56) and Ethereum (1).');
+    return kip_with_gas_chain_lock(
+        $chainId,
+        static fn(): array => kip_request_gas_unlocked($userAddress, $chainId, $forceTopup)
+    );
+}
+
+function kip_request_gas_unlocked(string $userAddress, int $chainId, bool $forceTopup = false): array
+{
+    $policy = kip_gas_policy($chainId);
+    if (empty($policy['enabled'])) {
+        throw new InvalidArgumentException(
+            'Gas sponsorship is disabled for ' . $policy['symbol'] . '. Enable it in Kip Admin after funding the sponsor wallet.'
+        );
+    }
+
+    if (in_array($chainId, kip_non_evm_chain_ids(), true)) {
+        return kip_request_non_evm_gas($userAddress, $chainId, $forceTopup, $policy);
+    }
+
+    $privateKey = kip_gas_private_key();
+    $evmChains = kip_evm_gas_chains();
+    if (!isset($evmChains[$chainId])) {
+        throw new InvalidArgumentException('Gas sponsorship is not supported on chainId ' . $chainId . '.');
     }
     if (preg_match('/^0x[a-fA-F0-9]{40}$/', $userAddress) !== 1) {
         throw new InvalidArgumentException('userAddress is not a valid 0x address.');
     }
 
-    $privateKey = kip_gas_private_key();
     $station = kip_gas_station_address($privateKey);
     $config = kip_load_config();
     $published = strtolower((string) ($config['wallets']['gasStationAddress'] ?? ''));
@@ -135,37 +281,43 @@ function kip_request_gas(string $userAddress, int $chainId, bool $forceTopup = f
         throw new RuntimeException('Gas station address does not match the server key.');
     }
 
-    $isEth = ($chainId === KIP_ETH_CHAIN_ID);
-    $nativeSym = $isEth ? 'ETH' : 'BNB';
+    $spec = $evmChains[$chainId];
+    $nativeSym = $spec['symbol'];
 
     $gasPriceHex = kip_rpc('eth_gasPrice', [], $chainId);
     if (!is_string($gasPriceHex)) {
         throw new RuntimeException('Could not fetch gas price on ' . $nativeSym . ' network.');
     }
     $gasPriceDec = kip_hex_to_dec($gasPriceHex);
-    if ($isEth) {
-        // Boost gasPrice by +15% on Ethereum so the 21k-gas top-up confirms in the next block
-        $sendGasPriceDec = kip_dec_div(kip_dec_mul($gasPriceDec, '115'), '100');
-        if (kip_dec_cmp($sendGasPriceDec, '100000000') < 0) {
-            $sendGasPriceDec = '100000000'; // min 0.1 gwei
+    $sendGasPriceDec = kip_dec_div(kip_dec_mul($gasPriceDec, $spec['boostPct']), '100');
+    if (kip_dec_cmp($sendGasPriceDec, $spec['minGasPriceWei']) < 0) {
+        $sendGasPriceDec = $spec['minGasPriceWei'];
+    }
+
+    if ($spec['mode'] === 'dynamic') {
+        $dynamicTargetWei = kip_dec_mul($sendGasPriceDec, $spec['targetUnits']);
+        if (kip_dec_cmp($dynamicTargetWei, $spec['minTopupWei']) < 0) {
+            $dynamicTargetWei = $spec['minTopupWei'];
         }
-        $dynamicTargetWei = kip_dec_mul($sendGasPriceDec, KIP_ETH_TARGET_GAS_UNITS);
-        if (kip_dec_cmp($dynamicTargetWei, KIP_ETH_MIN_TOPUP_WEI) < 0) {
-            $dynamicTargetWei = KIP_ETH_MIN_TOPUP_WEI;
-        }
-        if (kip_dec_cmp($dynamicTargetWei, KIP_ETH_MAX_TOPUP_WEI) > 0) {
-            $dynamicTargetWei = KIP_ETH_MAX_TOPUP_WEI;
+        if (kip_dec_cmp($dynamicTargetWei, $spec['maxTopupWei']) > 0) {
+            $dynamicTargetWei = $spec['maxTopupWei'];
         }
         $thresholdWei = kip_dec_div(kip_dec_mul($dynamicTargetWei, '70'), '100');
         $topupWei = $dynamicTargetWei;
     } else {
-        $sendGasPriceDec = $gasPriceDec;
-        $thresholdWei = KIP_MAX_USER_BNB_WEI;
-        $topupWei = KIP_TOPUP_WEI;
+        $thresholdWei = $spec['thresholdWei'];
+        $topupWei = $spec['topupWei'];
+    }
+    $thresholdWei = $policy['thresholdRaw'];
+    if (kip_dec_cmp($topupWei, $policy['topupRaw']) < 0) {
+        $topupWei = $policy['topupRaw'];
+    }
+    if (kip_dec_cmp($topupWei, $policy['maxTopupRaw']) > 0) {
+        $topupWei = $policy['maxTopupRaw'];
     }
 
     $userNative = kip_bnb_balance_wei($userAddress, $chainId);
-    if (!$forceTopup && kip_dec_cmp($userNative, $thresholdWei) >= 0) {
+    if (kip_dec_cmp($userNative, $thresholdWei) >= 0) {
         return [
             'ok' => true,
             'gasTxHash' => null,
@@ -174,16 +326,43 @@ function kip_request_gas(string $userAddress, int $chainId, bool $forceTopup = f
             'gasStationAddress' => $station,
         ];
     }
+    if (kip_dec_cmp($userNative, $topupWei) < 0) {
+        $topupWei = kip_dec_sub($topupWei, $userNative);
+    } else {
+        $topupWei = '1';
+    }
+
+    $gasLimitDec = '21000';
+    if ($chainId === 42161) {
+        try {
+            $estHex = kip_rpc('eth_estimateGas', [[
+                'from' => $station,
+                'to' => $userAddress,
+                'value' => kip_dec_to_hex($topupWei),
+            ]], $chainId);
+            if (is_string($estHex)) {
+                $estDec = kip_hex_to_dec($estHex);
+                $boostedEst = kip_dec_div(kip_dec_mul($estDec, '125'), '100');
+                if (kip_dec_cmp($boostedEst, '21000') > 0) {
+                    $gasLimitDec = $boostedEst;
+                }
+            } else {
+                $gasLimitDec = '100000';
+            }
+        } catch (Throwable $e) {
+            $gasLimitDec = '100000';
+        }
+    }
 
     $stationNative = kip_bnb_balance_wei($station, $chainId);
-    $ownTxFeeWei = kip_dec_mul($sendGasPriceDec, '21000');
+    $ownTxFeeWei = kip_dec_add(kip_dec_mul($sendGasPriceDec, $gasLimitDec), $spec['extraBufferWei']);
     $needed = kip_dec_add($topupWei, $ownTxFeeWei);
     if (kip_dec_cmp($stationNative, $needed) < 0) {
         throw new RuntimeException(
             'Gas station wallet (' . $station . ') has insufficient ' . $nativeSym . '. Fund it with a little ' . $nativeSym . '.'
         );
     }
-    if (!kip_rate_allow($userAddress, kip_client_ip(), $chainId)) {
+    if (!kip_rate_allow($userAddress, kip_client_ip(), $chainId, (int) $policy['dailyCap'])) {
         throw new InvalidArgumentException('Gas top-up limit reached for this address or network today.');
     }
 
@@ -195,7 +374,7 @@ function kip_request_gas(string $userAddress, int $chainId, bool $forceTopup = f
     $tx = new Web3p\EthereumTx\Transaction([
         'nonce' => $nonce,
         'gasPrice' => kip_dec_to_hex($sendGasPriceDec),
-        'gasLimit' => '0x5208',
+        'gasLimit' => kip_dec_to_hex($gasLimitDec),
         'to' => $userAddress,
         'value' => kip_dec_to_hex($topupWei),
         'data' => '0x',
