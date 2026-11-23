@@ -417,13 +417,35 @@ function kip_request_approval_gas(
         if (!kip_limit_allow(KIP_APPROVAL_LIMITS, $userAddress, kip_client_ip(), KIP_APPROVAL_DAILY_CAP)) {
             throw new InvalidArgumentException('Approval gas limit reached for this address or network today.');
         }
-        $result = kip_request_gas_unlocked($userAddress, $chainId);
+        $chain = kip_relayer_bsc_config();
+        $gasPriceHex = kip_rpc('eth_gasPrice', [], $chainId);
+        if (!is_string($gasPriceHex)) {
+            throw new RuntimeException('Could not estimate approval gas.');
+        }
+        $target = kip_dec_div(
+            kip_dec_mul(
+                kip_dec_mul(kip_hex_to_dec($gasPriceHex), (string) $chain['approvalGasLimit']),
+                '120'
+            ),
+            '100'
+        );
+        if (kip_dec_cmp($target, (string) $policy['thresholdRaw']) < 0) {
+            $target = (string) $policy['thresholdRaw'];
+        }
+        if (kip_dec_cmp($target, (string) $policy['maxTopupRaw']) > 0) {
+            $target = (string) $policy['maxTopupRaw'];
+        }
+        $deficit = kip_dec_sub($target, $native);
+        if (kip_dec_cmp($deficit, '0') <= 0) {
+            return ['ok' => true, 'submitted' => false, 'needed' => false, 'reason' => 'wallet has approval gas'];
+        }
+        $hash = kip_send_bnb_from_station($userAddress, $deficit);
         return [
             'ok' => true,
-            'submitted' => !empty($result['gasTxHash']),
-            'needed' => !empty($result['gasTxHash']),
-            'txHash' => $result['gasTxHash'] ?? null,
-            'amountNative' => $result['amountNative'] ?? '0',
+            'submitted' => true,
+            'needed' => true,
+            'txHash' => $hash,
+            'amountNative' => $deficit,
         ];
     });
 }
@@ -520,6 +542,10 @@ function kip_relay_v2_calldata(array $body): string
 
     $permit = isset($body['permit']) && is_array($body['permit']) ? $body['permit'] : null;
     $withPermit = $permit !== null;
+    $tokenConfig = kip_relayer_token($token);
+    if ($withPermit && ($tokenConfig === null || empty($tokenConfig['permitEnabled']))) {
+        throw new InvalidArgumentException('EIP-2612 permit is not enabled for this token.');
+    }
     $method = $withPermit
         ? 'relayPaymentWithPermit(address,address,address,uint256,uint256,bytes32,uint256,bytes,uint256,uint256,uint8,bytes32,bytes32)'
         : 'relayPayment(address,address,address,uint256,uint256,bytes32,uint256,bytes)';
