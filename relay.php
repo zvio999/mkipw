@@ -488,7 +488,12 @@ function kip_relay_calldata(array $body): string
         'priceSymbol' => 'USDTUSDT',
     ]);
     if (kip_dec_cmp($fee, $expectedFee) !== 0) {
-        throw new InvalidArgumentException('The service fee does not match the server configuration.');
+        $difference = kip_dec_cmp($fee, $expectedFee) > 0
+            ? kip_dec_sub($fee, $expectedFee)
+            : kip_dec_sub($expectedFee, $fee);
+        if (kip_dec_cmp($difference, '1') > 0) {
+            throw new InvalidArgumentException('The service fee does not match the server configuration.');
+        }
     }
 
     $selector = substr(\kornrunner\Keccak::hash(
