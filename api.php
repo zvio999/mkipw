@@ -83,6 +83,15 @@ try {
         kip_json(200, kip_gas_signer_self_test());
     }
 
+    if ($action === 'relay_capabilities') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            kip_json(405, ['ok' => false, 'error' => 'Method not allowed']);
+        }
+        $chainId = (int) ($_GET['chainId'] ?? 0);
+        $tokenAddress = trim((string) ($_GET['tokenAddress'] ?? ''));
+        kip_json(200, kip_relayer_capabilities($chainId, $tokenAddress));
+    }
+
     if ($action === 'check_invoice') {
         if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
             kip_json(405, ['ok' => false, 'error' => 'Method not allowed']);
@@ -142,7 +151,21 @@ try {
     if ($action === 'request_approval_gas') {
         $userAddress = trim((string) ($body['userAddress'] ?? ''));
         $chainId = (int) ($body['chainId'] ?? 0);
-        kip_json(200, kip_request_approval_gas($userAddress, $chainId));
+        $tokenAddress = trim((string) ($body['tokenAddress'] ?? KIP_USDT_TOKEN));
+        $requiredWei = trim((string) ($body['requiredWei'] ?? '1'));
+        $relayerAddress = trim((string) ($body['relayerAddress'] ?? ''));
+        kip_json(200, kip_request_approval_gas(
+            $userAddress,
+            $chainId,
+            $tokenAddress,
+            $requiredWei,
+            $relayerAddress
+        ));
+    }
+
+    if ($action === 'relay_quote') {
+        $chainId = (int) ($body['chainId'] ?? 0);
+        kip_json(200, kip_create_relay_quote($body, $chainId));
     }
 
     if ($action === 'submit_relay') {

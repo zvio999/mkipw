@@ -216,6 +216,43 @@ function kip_default_config(): array
         ],
         'chainRpcUrls' => [],
         'gasSponsorship' => kip_default_gas_sponsorship(),
+        'relayer' => [
+            'quoteTtlSeconds' => 120,
+            'maxPriceAgeSeconds' => 300,
+            'chains' => [
+                'bep20' => [
+                    'enabled' => true,
+                    'chainId' => 56,
+                    'v1Address' => '',
+                    'v2Address' => '0x7Bcd283c5fc00CBcF593e6c24e09C3858344516F',
+                    'approvalGasLimit' => 70000,
+                    'tokens' => [
+                        [
+                            'symbol' => 'USDT',
+                            'address' => '0x55d398326f99059fF775485246999027B3197955',
+                            'decimals' => 18,
+                            'enabled' => true,
+                            'stableUsd' => true,
+                            'priceSymbol' => 'USDTUSDT',
+                            'permitEnabled' => false,
+                            'permitName' => '',
+                            'permitVersion' => '1',
+                        ],
+                        [
+                            'symbol' => 'USDC',
+                            'address' => '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+                            'decimals' => 18,
+                            'enabled' => true,
+                            'stableUsd' => true,
+                            'priceSymbol' => 'USDCUSDT',
+                            'permitEnabled' => false,
+                            'permitName' => '',
+                            'permitVersion' => '1',
+                        ],
+                    ],
+                ],
+            ],
+        ],
         'defaultTokens' => [
             [
                 'id' => 'bnb-native',
@@ -280,6 +317,55 @@ function kip_default_config(): array
             'merchantVaultAddress' => '',
             'gasStationAddress' => '',
             'relayerContract' => '',
+        ],
+    ];
+}
+
+function kip_sanitize_relayer(mixed $value): array
+{
+    $defaults = kip_default_config()['relayer'];
+    $input = is_array($value) ? $value : [];
+    $chains = is_array($input['chains'] ?? null) ? $input['chains'] : [];
+    $bscIn = is_array($chains['bep20'] ?? null) ? $chains['bep20'] : [];
+    $bscDefault = $defaults['chains']['bep20'];
+    $tokensIn = is_array($bscIn['tokens'] ?? null) ? $bscIn['tokens'] : $bscDefault['tokens'];
+    $tokens = [];
+    foreach ($tokensIn as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $address = kip_address_or_blank($row['address'] ?? '');
+        $symbol = strtoupper(trim((string) ($row['symbol'] ?? '')));
+        if ($address === '' || preg_match('/^[A-Z0-9]{2,12}$/', $symbol) !== 1) {
+            continue;
+        }
+        $priceSymbol = strtoupper(trim((string) ($row['priceSymbol'] ?? ($symbol . 'USDT'))));
+        $tokens[] = [
+            'symbol' => $symbol,
+            'address' => $address,
+            'decimals' => max(0, min(36, (int) ($row['decimals'] ?? 18))),
+            'enabled' => !empty($row['enabled']),
+            'stableUsd' => !empty($row['stableUsd']),
+            'priceSymbol' => preg_match('/^[A-Z0-9]{4,24}$/', $priceSymbol) === 1 ? $priceSymbol : ($symbol . 'USDT'),
+            'permitEnabled' => !empty($row['permitEnabled']),
+            'permitName' => trim((string) ($row['permitName'] ?? '')),
+            'permitVersion' => trim((string) ($row['permitVersion'] ?? '1')) ?: '1',
+        ];
+    }
+    return [
+        'quoteTtlSeconds' => max(30, min(600, (int) ($input['quoteTtlSeconds'] ?? $defaults['quoteTtlSeconds']))),
+        'maxPriceAgeSeconds' => max(30, min(3600, (int) ($input['maxPriceAgeSeconds'] ?? $defaults['maxPriceAgeSeconds']))),
+        'chains' => [
+            'bep20' => [
+                'enabled' => array_key_exists('enabled', $bscIn)
+                    ? !empty($bscIn['enabled'])
+                    : $bscDefault['enabled'],
+                'chainId' => 56,
+                'v1Address' => kip_address_or_blank($bscIn['v1Address'] ?? $bscDefault['v1Address']),
+                'v2Address' => kip_address_or_blank($bscIn['v2Address'] ?? $bscDefault['v2Address']),
+                'approvalGasLimit' => max(45000, min(250000, (int) ($bscIn['approvalGasLimit'] ?? $bscDefault['approvalGasLimit']))),
+                'tokens' => $tokens,
+            ],
         ],
     ];
 }
@@ -376,6 +462,10 @@ function kip_public_config(array $config): array
     $features = $config['features'] ?? $defaults['features'];
     $wallets = $config['wallets'] ?? $defaults['wallets'];
     $gasSponsorship = kip_sanitize_gas_sponsorship($config['gasSponsorship'] ?? null);
+    $relayer = kip_sanitize_relayer($config['relayer'] ?? null);
+    if ($relayer['chains']['bep20']['v1Address'] === '') {
+        $relayer['chains']['bep20']['v1Address'] = kip_address_or_blank($wallets['relayerContract'] ?? '');
+    }
 
     $enabledChains = $allChainKeys;
     if (isset($features['enabledChains']) && is_array($features['enabledChains'])) {
@@ -392,6 +482,7 @@ function kip_public_config(array $config): array
         ],
         'chainRpcUrls' => (object) $chainRpcUrls,
         'gasSponsorship' => $gasSponsorship,
+        'relayer' => $relayer,
         'defaultTokens' => $tokens,
         'chainTokens' => (object) $chainTokens,
         'serviceFee' => [

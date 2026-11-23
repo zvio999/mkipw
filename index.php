@@ -115,6 +115,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && kip_csrf_ok()) {
             $config['gasSponsorship'] = kip_sanitize_gas_sponsorship($next);
             kip_save_config($config);
             $flash = 'Gas sponsorship settings saved. Enable a chain only after its displayed sponsor address is funded and tested.';
+        } elseif ($action === 'save_relayer') {
+            $posted = isset($_POST['relayer']) && is_array($_POST['relayer']) ? $_POST['relayer'] : [];
+            $posted['chains']['bep20']['enabled'] = isset($posted['chains']['bep20']['enabled']);
+            $postedTokens = $posted['chains']['bep20']['tokens'] ?? [];
+            if (is_array($postedTokens)) {
+                foreach ($postedTokens as &$tokenRow) {
+                    if (is_array($tokenRow)) {
+                        $tokenRow['enabled'] = isset($tokenRow['enabled']);
+                        $tokenRow['stableUsd'] = isset($tokenRow['stableUsd']);
+                        $tokenRow['permitEnabled'] = isset($tokenRow['permitEnabled']);
+                    }
+                }
+                unset($tokenRow);
+            }
+            $posted['chains']['bep20']['tokens'] = $postedTokens;
+            $config['relayer'] = kip_sanitize_relayer($posted);
+            kip_save_config($config);
+            $flash = 'Relayer V1/V2 settings saved.';
         } elseif ($action === 'save_fee') {
             $config['serviceFee'] = [
                 'enabled' => isset($_POST['fee_enabled']),
@@ -438,6 +456,65 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
               <p class="text-xs text-amber-400"><?= kip_h((string) ($stationAddrs['error'] ?? 'GAS_STATION_PRIVATE_KEY is not configured yet.')) ?></p>
             <?php endif; ?>
           </div>
+        </section>
+
+        <?php $relayBsc = $config['relayer']['chains']['bep20']; ?>
+        <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
+          <h2 class="mb-4 text-lg font-semibold text-kip-gold">Gasless relayer V1/V2</h2>
+          <form method="post" class="grid gap-4">
+            <input type="hidden" name="csrf" value="<?= $csrf ?>" />
+            <input type="hidden" name="action" value="save_relayer" />
+            <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3">
+              <input type="checkbox" name="relayer[chains][bep20][enabled]" class="h-5 w-5 accent-kip-gold" <?= !empty($relayBsc['enabled']) ? 'checked' : '' ?> />
+              <span>Enable BNB Chain gasless transfers</span>
+            </label>
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="text-sm text-kip-mute">V1 address (legacy USDT)
+                <input name="relayer[chains][bep20][v1Address]" value="<?= kip_h((string) $relayBsc['v1Address']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 font-mono text-white" placeholder="0x…" />
+              </label>
+              <label class="text-sm text-kip-mute">V2 address
+                <input name="relayer[chains][bep20][v2Address]" value="<?= kip_h((string) $relayBsc['v2Address']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 font-mono text-white" placeholder="0x…" />
+              </label>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3">
+              <label class="text-sm text-kip-mute">Quote TTL (seconds)
+                <input type="number" min="30" max="600" name="relayer[quoteTtlSeconds]" value="<?= (int) $config['relayer']['quoteTtlSeconds'] ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
+              </label>
+              <label class="text-sm text-kip-mute">Maximum price age (seconds)
+                <input type="number" min="30" max="3600" name="relayer[maxPriceAgeSeconds]" value="<?= (int) $config['relayer']['maxPriceAgeSeconds'] ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
+              </label>
+              <label class="text-sm text-kip-mute">Approval gas units
+                <input type="number" min="45000" max="250000" name="relayer[chains][bep20][approvalGasLimit]" value="<?= (int) $relayBsc['approvalGasLimit'] ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
+              </label>
+            </div>
+            <?php foreach ($relayBsc['tokens'] as $tokenIndex => $relayToken): ?>
+              <div class="grid gap-3 rounded-xl border border-kip-border bg-kip-bg p-3 md:grid-cols-4">
+                <?php foreach (['symbol', 'address', 'decimals'] as $field): ?>
+                  <input type="hidden" name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][<?= $field ?>]" value="<?= kip_h((string) $relayToken[$field]) ?>" />
+                <?php endforeach; ?>
+                <label class="flex items-center gap-2 text-sm text-white">
+                  <input type="checkbox" name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][enabled]" class="h-5 w-5 accent-kip-gold" <?= !empty($relayToken['enabled']) ? 'checked' : '' ?> />
+                  <?= kip_h((string) $relayToken['symbol']) ?>
+                </label>
+                <label class="text-xs text-kip-mute">Price symbol
+                  <input name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][priceSymbol]" value="<?= kip_h((string) $relayToken['priceSymbol']) ?>" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-2 text-white" />
+                </label>
+                <label class="flex items-center gap-2 text-xs text-kip-mute">
+                  <input type="checkbox" name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][stableUsd]" <?= !empty($relayToken['stableUsd']) ? 'checked' : '' ?> />
+                  USD stablecoin
+                </label>
+                <div>
+                  <label class="flex items-center gap-2 text-xs text-kip-mute">
+                    <input type="checkbox" name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][permitEnabled]" <?= !empty($relayToken['permitEnabled']) ? 'checked' : '' ?> />
+                    EIP-2612 permit
+                  </label>
+                  <input name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][permitName]" value="<?= kip_h((string) $relayToken['permitName']) ?>" placeholder="Permit token name" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-1 text-xs text-white" />
+                  <input name="relayer[chains][bep20][tokens][<?= (int) $tokenIndex ?>][permitVersion]" value="<?= kip_h((string) $relayToken['permitVersion']) ?>" placeholder="1" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-2 py-1 text-xs text-white" />
+                </div>
+              </div>
+            <?php endforeach; ?>
+            <button class="w-fit rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save relayer</button>
+          </form>
         </section>
 
         <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
