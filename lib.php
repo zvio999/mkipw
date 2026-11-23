@@ -203,6 +203,34 @@ function kip_sanitize_gas_sponsorship(mixed $value): array
     return $out;
 }
 
+function kip_default_service_fee(): array
+{
+    return [
+        'enabled' => false,
+        'feeMode' => 'percent',
+        'feePercent' => 0.5,
+        'feeFixed' => '0',
+        'minAmount' => '0',
+        'feeCollectorAddress' => '',
+    ];
+}
+
+function kip_sanitize_service_fee(mixed $value, ?array $fallback = null): array
+{
+    $defaults = $fallback ?? kip_default_service_fee();
+    $fee = is_array($value) ? $value : [];
+    return [
+        'enabled' => array_key_exists('enabled', $fee)
+            ? !empty($fee['enabled'])
+            : !empty($defaults['enabled']),
+        'feeMode' => (($fee['feeMode'] ?? $defaults['feeMode']) === 'fixed') ? 'fixed' : 'percent',
+        'feePercent' => max(0, min(100, (float) ($fee['feePercent'] ?? $defaults['feePercent']))),
+        'feeFixed' => kip_fee_fixed((string) ($fee['feeFixed'] ?? $defaults['feeFixed'])),
+        'minAmount' => kip_fee_fixed((string) ($fee['minAmount'] ?? $defaults['minAmount'])),
+        'feeCollectorAddress' => substr(trim((string) ($fee['feeCollectorAddress'] ?? $defaults['feeCollectorAddress'])), 0, 180),
+    ];
+}
+
 function kip_default_config(): array
 {
     $allChainKeys = array_keys(kip_managed_chains());
@@ -283,14 +311,8 @@ function kip_default_config(): array
             ],
         ],
         'chainTokens' => [],
-        'serviceFee' => [
-            'enabled' => false,
-            'feeMode' => 'percent',
-            'feePercent' => 0.5,
-            'feeFixed' => '0',
-            'minAmount' => '0',
-            'feeCollectorAddress' => '',
-        ],
+        'serviceFee' => kip_default_service_fee(),
+        'serviceFees' => array_fill_keys($allChainKeys, kip_default_service_fee()),
         'maintenance' => [
             'isUnderMaintenance' => false,
             'message' => 'Broadcasting is paused. Try again shortly.',
@@ -456,7 +478,22 @@ function kip_public_config(array $config): array
         }
     }
 
-    $fee = $config['serviceFee'] ?? $defaults['serviceFee'];
+    $legacyFee = kip_sanitize_service_fee($config['serviceFee'] ?? $defaults['serviceFee']);
+    $configuredFees = isset($config['serviceFees']) && is_array($config['serviceFees'])
+        ? $config['serviceFees']
+        : [];
+    $evmFeeChains = ['bep20', 'ethereum', 'base', 'arbitrum', 'optimism', 'avalanche', 'polygon'];
+    $serviceFees = [];
+    foreach ($allChainKeys as $chainKey) {
+        $fallback = in_array($chainKey, $evmFeeChains, true)
+            ? $legacyFee
+            : kip_default_service_fee();
+        $serviceFees[$chainKey] = kip_sanitize_service_fee(
+            $configuredFees[$chainKey] ?? null,
+            $fallback
+        );
+    }
+    $fee = $serviceFees['bep20'];
     $maint = $config['maintenance'] ?? $defaults['maintenance'];
     $version = $config['versionControl'] ?? $defaults['versionControl'];
     $features = $config['features'] ?? $defaults['features'];
@@ -485,14 +522,9 @@ function kip_public_config(array $config): array
         'relayer' => $relayer,
         'defaultTokens' => $tokens,
         'chainTokens' => (object) $chainTokens,
-        'serviceFee' => [
-            'enabled' => !empty($fee['enabled']),
-            'feeMode' => (($fee['feeMode'] ?? 'percent') === 'fixed') ? 'fixed' : 'percent',
-            'feePercent' => (float) ($fee['feePercent'] ?? 0),
-            'feeFixed' => kip_fee_fixed((string) ($fee['feeFixed'] ?? '0')),
-            'minAmount' => kip_fee_fixed((string) ($fee['minAmount'] ?? '0')),
-            'feeCollectorAddress' => (string) ($fee['feeCollectorAddress'] ?? ''),
-        ],
+        // Legacy alias kept for already-installed clients; it mirrors BNB Chain.
+        'serviceFee' => $fee,
+        'serviceFees' => $serviceFees,
         'maintenance' => [
             'isUnderMaintenance' => !empty($maint['isUnderMaintenance']),
             'message' => (string) ($maint['message'] ?? ''),

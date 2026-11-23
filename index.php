@@ -134,16 +134,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && kip_csrf_ok()) {
             kip_save_config($config);
             $flash = 'Relayer V1/V2 settings saved.';
         } elseif ($action === 'save_fee') {
-            $config['serviceFee'] = [
-                'enabled' => isset($_POST['fee_enabled']),
-                'feeMode' => (($_POST['feeMode'] ?? 'percent') === 'fixed') ? 'fixed' : 'percent',
-                'feePercent' => (float) ($_POST['feePercent'] ?? 0),
-                'feeFixed' => kip_fee_fixed((string) ($_POST['feeFixed'] ?? '0')),
-                'minAmount' => kip_fee_fixed((string) ($_POST['minAmount'] ?? '0')),
-                'feeCollectorAddress' => trim((string) ($_POST['feeCollectorAddress'] ?? '')),
-            ];
+            $postedFees = isset($_POST['fees']) && is_array($_POST['fees'])
+                ? $_POST['fees']
+                : [];
+            $nextFees = [];
+            foreach (kip_managed_chains() as $chainKey => $_chainName) {
+                $row = isset($postedFees[$chainKey]) && is_array($postedFees[$chainKey])
+                    ? $postedFees[$chainKey]
+                    : [];
+                $row['enabled'] = isset($row['enabled']);
+                $nextFees[$chainKey] = kip_sanitize_service_fee($row);
+            }
+            $config['serviceFees'] = $nextFees;
+            $config['serviceFee'] = $nextFees['bep20'];
             kip_save_config($config);
-            $flash = 'Service fee settings saved.';
+            $flash = 'Per-chain service fee settings saved.';
         } elseif ($action === 'save_rpc') {
             $fallbacks = preg_split('/\r\n|\r|\n/', (string) ($_POST['fallbacks'] ?? '')) ?: [];
             $fallbacks = array_values(array_filter(array_map('trim', $fallbacks)));
@@ -552,36 +557,52 @@ $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : '
         </section>
 
         <section class="rounded-2xl border border-kip-border bg-kip-card p-6">
-          <h2 class="mb-4 text-lg font-semibold text-kip-gold">Service fee &amp; monetization</h2>
+          <h2 class="mb-2 text-lg font-semibold text-kip-gold">Service fee &amp; monetization by chain</h2>
+          <p class="mb-4 text-sm text-kip-mute">Each network has an independent fee type, amount, minimum, and collector address. Disabled networks do not charge a service fee.</p>
           <form method="post" class="grid gap-4">
             <input type="hidden" name="csrf" value="<?= $csrf ?>" />
             <input type="hidden" name="action" value="save_fee" />
-            <label class="flex items-center gap-3 rounded-lg border border-kip-border bg-kip-bg px-3 py-3">
-              <input type="checkbox" name="fee_enabled" class="h-5 w-5 accent-kip-gold" <?= !empty($config['serviceFee']['enabled']) ? 'checked' : '' ?> />
-              <span>Enable service fee</span>
-            </label>
-            <label class="text-sm text-kip-mute">Fee type
-              <select name="feeMode" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white">
-                <option value="percent" <?= (($config['serviceFee']['feeMode'] ?? 'percent') !== 'fixed') ? 'selected' : '' ?>>Percentage of each payment</option>
-                <option value="fixed" <?= (($config['serviceFee']['feeMode'] ?? '') === 'fixed') ? 'selected' : '' ?>>Fixed amount on every payment</option>
-              </select>
-            </label>
-            <div class="grid gap-4 md:grid-cols-2">
-              <label class="text-sm text-kip-mute">Fee percent
-                <input type="number" step="0.01" min="0" max="100" name="feePercent" value="<?= kip_h((string) $config['serviceFee']['feePercent']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" />
-              </label>
-              <label class="text-sm text-kip-mute">Fixed fee
-                <input type="text" inputmode="decimal" name="feeFixed" value="<?= kip_h((string) ($config['serviceFee']['feeFixed'] ?? '0')) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" placeholder="0.10" />
-              </label>
-            </div>
-            <label class="text-sm text-kip-mute">Minimum USDT amount
-              <input type="text" inputmode="decimal" name="minAmount" value="<?= kip_h((string) ($config['serviceFee']['minAmount'] ?? '0')) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 text-white" placeholder="1" />
-            </label>
-            <p class="text-sm text-kip-mute">Percentage takes a share of each payment. Fixed fee charges that same token amount on every payment. A USDT payment uses USDT. Only the selected fee type is charged. Minimum amount blocks any USDT payment below that number. Use 0 for no minimum.</p>
-            <label class="text-sm text-kip-mute">Fee collector address (0x…)
-              <input type="text" name="feeCollectorAddress" value="<?= kip_h($config['serviceFee']['feeCollectorAddress']) ?>" class="mt-1 w-full rounded-lg border border-kip-border bg-kip-bg px-3 py-2 font-mono text-white" placeholder="0x…" />
-            </label>
-            <button class="w-fit rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save fee</button>
+            <?php
+              $collectorPlaceholders = [
+                  'bep20' => '0x…', 'ethereum' => '0x…', 'base' => '0x…',
+                  'arbitrum' => '0x…', 'optimism' => '0x…', 'avalanche' => '0x…',
+                  'polygon' => '0x…', 'tron' => 'T…', 'sol' => 'Solana address',
+                  'dot' => 'Polkadot SS58 address', 'near' => 'account.near',
+                  'ton' => 'UQ…', 'apt' => '0x… (64 hex)',
+              ];
+            ?>
+            <?php foreach (kip_managed_chains() as $chainKey => $chainName): ?>
+              <?php $chainFee = $config['serviceFees'][$chainKey] ?? kip_default_service_fee(); ?>
+              <div class="grid gap-4 rounded-xl border border-kip-border bg-kip-bg p-4">
+                <label class="flex items-center gap-3 text-white">
+                  <input type="checkbox" name="fees[<?= kip_h($chainKey) ?>][enabled]" class="h-5 w-5 accent-kip-gold" <?= !empty($chainFee['enabled']) ? 'checked' : '' ?> />
+                  <span class="font-semibold"><?= kip_h($chainName) ?></span>
+                </label>
+                <div class="grid gap-4 md:grid-cols-3">
+                  <label class="text-xs text-kip-mute">Fee type
+                    <select name="fees[<?= kip_h($chainKey) ?>][feeMode]" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-3 py-2 text-white">
+                      <option value="percent" <?= (($chainFee['feeMode'] ?? 'percent') !== 'fixed') ? 'selected' : '' ?>>Percentage</option>
+                      <option value="fixed" <?= (($chainFee['feeMode'] ?? '') === 'fixed') ? 'selected' : '' ?>>Fixed USDT value</option>
+                    </select>
+                  </label>
+                  <label class="text-xs text-kip-mute">Fee percent
+                    <input type="number" step="0.01" min="0" max="100" name="fees[<?= kip_h($chainKey) ?>][feePercent]" value="<?= kip_h((string) $chainFee['feePercent']) ?>" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-3 py-2 text-white" />
+                  </label>
+                  <label class="text-xs text-kip-mute">Fixed fee (USDT value)
+                    <input type="text" inputmode="decimal" name="fees[<?= kip_h($chainKey) ?>][feeFixed]" value="<?= kip_h((string) $chainFee['feeFixed']) ?>" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-3 py-2 text-white" placeholder="0.02" />
+                  </label>
+                </div>
+                <div class="grid gap-4 md:grid-cols-3">
+                  <label class="text-xs text-kip-mute">Minimum USDT payment
+                    <input type="text" inputmode="decimal" name="fees[<?= kip_h($chainKey) ?>][minAmount]" value="<?= kip_h((string) $chainFee['minAmount']) ?>" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-3 py-2 text-white" placeholder="0" />
+                  </label>
+                  <label class="text-xs text-kip-mute md:col-span-2">Collector address
+                    <input type="text" name="fees[<?= kip_h($chainKey) ?>][feeCollectorAddress]" value="<?= kip_h((string) $chainFee['feeCollectorAddress']) ?>" class="mt-1 w-full rounded border border-kip-border bg-kip-card px-3 py-2 font-mono text-white" placeholder="<?= kip_h($collectorPlaceholders[$chainKey] ?? '') ?>" />
+                  </label>
+                </div>
+              </div>
+            <?php endforeach; ?>
+            <button class="w-fit rounded-lg bg-kip-gold px-4 py-2 font-semibold text-kip-ink">Save all chain fees</button>
           </form>
         </section>
 
