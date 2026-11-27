@@ -143,10 +143,62 @@ function kip_sync_github_repo(
     }
 }
 
+function kip_generate_missing_gas_keys(string $mkipwDir): array
+{
+    $path = $mkipwDir . '/data/gas-station.env';
+    $names = [
+        'GAS_STATION_PRIVATE_KEY',
+        'GAS_STATION_TRON_PRIVATE_KEY',
+        'GAS_STATION_SOL_SEED',
+        'GAS_STATION_TON_SEED',
+        'GAS_STATION_APT_SEED',
+        'GAS_STATION_NEAR_SEED',
+        'GAS_STATION_DOT_SEED',
+    ];
+    $raw = is_file($path) ? (string) file_get_contents($path) : '';
+    $missing = [];
+    foreach ($names as $name) {
+        if (preg_match('/^' . preg_quote($name, '/') . '=(?:0x)?[a-fA-F0-9]{64}$/m', $raw) !== 1) {
+            $missing[] = $name;
+        }
+    }
+    if ($missing === []) {
+        return [];
+    }
+    if (!is_dir(dirname($path))) {
+        mkdir(dirname($path), 0750, true);
+    }
+    $append = [];
+    if (trim($raw) === '') {
+        $append[] = '# Kip gas station hot-wallet keys. Keep an offline encrypted backup.';
+        $append[] = '# Generated ' . gmdate(DATE_ATOM);
+    }
+    foreach ($missing as $name) {
+        $append[] = $name . '=0x' . bin2hex(random_bytes(32));
+    }
+    $next = rtrim($raw) . ($raw === '' ? '' : "\n") . implode("\n", $append) . "\n";
+    $temp = $path . '.tmp';
+    if (file_put_contents($temp, $next, LOCK_EX) === false) {
+        throw new RuntimeException('Could not write missing gas station keys.');
+    }
+    chmod($temp, 0600);
+    if (!rename($temp, $path)) {
+        @unlink($temp);
+        throw new RuntimeException('Could not install missing gas station keys.');
+    }
+    return $missing;
+}
+
 $target = (string) ($_GET['target'] ?? 'all');
+$generatedGasKeys = [];
 
 if ($target === 'all' || $target === 'mkipw') {
     kip_sync_github_repo('zvio999/mkipw', 'main', '', $mkipwDir, $copied, $errors);
+    try {
+        $generatedGasKeys = kip_generate_missing_gas_keys($mkipwDir);
+    } catch (Throwable $e) {
+        $errors[] = $e->getMessage();
+    }
 }
 
 if ($target === 'all' || $target === 'site') {
@@ -171,6 +223,7 @@ echo json_encode([
     'target' => $target,
     'updatedCount' => count($copied),
     'updatedFiles' => $copied,
+    'generatedGasKeys' => $generatedGasKeys,
     'errors' => $errors,
     'cleanReport' => $cleanReport,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
