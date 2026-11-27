@@ -317,7 +317,7 @@ function kip_request_gas_unlocked(string $userAddress, int $chainId, bool $force
     }
 
     $userNative = kip_bnb_balance_wei($userAddress, $chainId);
-    if (kip_dec_cmp($userNative, $thresholdWei) >= 0) {
+    if (!$forceTopup && kip_dec_cmp($userNative, $thresholdWei) >= 0) {
         return [
             'ok' => true,
             'gasTxHash' => null,
